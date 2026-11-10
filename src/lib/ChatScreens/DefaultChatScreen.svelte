@@ -3,6 +3,7 @@
     import Suggestion from './Suggestion.svelte';
     import { CameraIcon, ChevronUpIcon, ChevronDownIcon, ChevronsUpIcon, ChevronsDownIcon, DatabaseIcon, FileTextIcon, GlobeIcon, ImagePlusIcon, LanguagesIcon, Laugh, MenuIcon, MicOffIcon, PackageIcon, Plus, RefreshCcwIcon, ReplyIcon, Send, StepForwardIcon, XIcon, BrainIcon, ArrowDown, ZapIcon, Maximize2, Minimize2, BookOpenIcon, WandSparklesIcon, Undo2Icon, LoaderCircleIcon, SquareIcon } from "@lucide/svelte";
     import { runInputAssistant } from "src/ts/risubard/inputAssistantRunner";
+    import { EASY_OPEN_MEMORY_WIKI } from 'src/ts/easyMode/events';
     import ShDropdownMenu from 'src/lib/UI/GUI/ShDropdownMenu.svelte';
     import ShDropdownMenuTrigger from 'src/lib/UI/GUI/ShDropdownMenuTrigger.svelte';
     import ShDropdownMenuContent from 'src/lib/UI/GUI/ShDropdownMenuContent.svelte';
@@ -147,6 +148,12 @@ import { isMobile } from 'src/ts/platform'
     let messageInputTranslate:string = $state('')
     let openMenu = $state(false)
     let memoryWikiOpen = $state(false)
+    // easy-mode: the easy chat menu opens the Memory Wiki (src/ts/easyMode/events.ts).
+    $effect(() => {
+        const open = () => { memoryWikiOpen = true }
+        window.addEventListener(EASY_OPEN_MEMORY_WIKI, open)
+        return () => window.removeEventListener(EASY_OPEN_MEMORY_WIKI, open)
+    })
     let arcaChatLogOpen = $state(false)
     let chatPage = $state(0)
     let firstMessageCollapsed = $state(true)

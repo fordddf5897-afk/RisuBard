@@ -1,0 +1,38 @@
+{
+  "skinApi": 1,
+  "id": "easy-garden",
+  "name": "정원",
+  "description": "간편 모드용 밝은 스킨. 크림색 바탕에 초록 강조색, 둥근 카드.",
+  "base": "light",
+  "colors": {
+    "bgcolor": "#f7f8f3",
+    "darkbg": "#eef1e7",
+    "darkbutton": "#e3e9d8",
+    "selected": "#dbe6cf",
+    "borderc": "#4f7a52",
+    "darkborderc": "#d6dccb",
+    "textcolor": "#1f2a1f",
+    "textcolor2": "#5a6859",
+    "primary": "#3f7a4a",
+    "accenttext": "#ffffff",
+    "draculared": "#b3362a",
+    "binding": "#3f7a4a",
+    "binding-text": "#ffffff",
+    "binding-border": "#2f5e38"
+  },
+  "chatText": {
+    "standard": "#1f2a1f",
+    "bold": "#16301b",
+    "italic": "#56645a",
+    "italicBold": "#3f4d43",
+    "quote1": "#3b6a44",
+    "quote2": "#2b587f"
+  },
+  "tokens": {
+    "radius-md": "0.625rem",
+    "radius-lg": "0.875rem",
+    "radius-xl": "1rem",
+    "radius-2xl": "1.25rem",
+    "radius-3xl": "1.75rem"
+  }
+}

@@ -27,6 +27,7 @@
     import { activateWikiEmbeddings, activateHistoricalSourceEmbeddings, refreshHistoricalSourceEmbeddings, stopHistoricalSourceEmbeddings, wikiEmbeddingRuntime } from 'src/ts/risubard/wikiEmbeddingService';
     import { resolveRisuBardChatSettings } from 'src/ts/risubard/risuBardSettings';
     import { RISUBARD_MEMORY_UPDATED_EVENT, type RisuBardMemoryUpdatedDetail } from 'src/ts/risubard/memoryEvents';
+    import { EASY_OPEN_SAVE_SLOTS, EASY_QUICK_SAVE, saveSlotModeFrom } from 'src/ts/easyMode/events';
     let openChatList = $state(false)
     let openModuleList = $state(false)
     let saveSlotsOpen = $state(false)
@@ -75,6 +76,18 @@
         saveSlotsMode = mode
         saveSlotsOpen = true
     }
+
+    // easy-mode: the easy chat menu opens save slots here (src/ts/easyMode/events.ts).
+    $effect(() => {
+        const openSlots = (event: Event) => openSaveSlots(saveSlotModeFrom(event))
+        const quickSave = () => { void quickSaveCurrentChat() }
+        window.addEventListener(EASY_OPEN_SAVE_SLOTS, openSlots)
+        window.addEventListener(EASY_QUICK_SAVE, quickSave)
+        return () => {
+            window.removeEventListener(EASY_OPEN_SAVE_SLOTS, openSlots)
+            window.removeEventListener(EASY_QUICK_SAVE, quickSave)
+        }
+    })
 
     async function saveCurrentChat(
         saveId?: string,

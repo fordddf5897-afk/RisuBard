@@ -48,6 +48,9 @@
     import RequestStatusToaster from './lib/UI/GUI/RequestStatusToaster.svelte';
     import { createKeepAliveAudio } from './ts/keepAliveAudio';
     import { RISU_APP_INTERNAL_DRAG_TYPE, RISU_SIDEBAR_DRAG_TYPE } from './ts/dragTypes';
+    // easy-mode: Eden-style home/work/chat shell (src/lib/EasyMode)
+    import EasyModeShell from './lib/EasyMode/EasyModeShell.svelte';
+    import { easyModeEnabled } from './ts/easyMode/state.svelte';
 
     let gridOpen = $state(false)
     let aprilFools = $state(new Date().getMonth() === 3 && new Date().getDate() === 1)
@@ -276,6 +279,8 @@
             {@const Settings = settingsModule.default}
             <Settings />
         {/await}
+    {:else if $easyModeEnabled}
+        <EasyModeShell />
     {:else if $MobileGUI}
         <div class="w-full h-full flex flex-col">
             <MobileHeader />
