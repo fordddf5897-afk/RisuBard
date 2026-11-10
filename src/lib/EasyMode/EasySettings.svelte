@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { CheckIcon, DownloadIcon, ImageIcon, LayoutPanelLeftIcon, SettingsIcon, UploadIcon } from '@lucide/svelte'
+    import { ArchiveRestoreIcon, CheckIcon, ChevronRightIcon, DownloadIcon, ImageIcon, LayoutPanelLeftIcon, SettingsIcon, SparklesIcon, UploadIcon } from '@lucide/svelte'
     import { DBState, OtherBotsSubmenuIndex } from 'src/ts/stores.svelte'
     import { easyPrefs, saveEasyPrefs, setEasyModeEnabled } from 'src/ts/easyMode/state.svelte'
     import { importAppSkinFile, installAppSkinFromText, isAppSkinSuppressed, listAppSkins, selectAppSkin } from 'src/ts/gui/appSkinRuntime'
@@ -38,6 +38,28 @@
 </script>
 
 <div class="mx-auto flex max-w-2xl flex-col gap-8 p-4 pb-12">
+    <section aria-labelledby="easy-full-title">
+        <h3 id="easy-full-title" class="text-base font-bold">전체 설정</h3>
+        <p class="mt-1 text-sm text-textcolor2">AI 연결(모델·API 키), 기존 리스 데이터 가져오기 같은 설정은 RisuBard 전체 설정에 있어요. 닫으면 간편 모드로 돌아와요.</p>
+        <div class="mt-3 flex flex-col overflow-hidden rounded-xl border border-darkborderc bg-darkbg">
+            <button type="button" class="easy-link" data-easy-open-ai onclick={() => openSettings(SettingsRoute.ModelPreset)}>
+                <SparklesIcon size={18} class="shrink-0 text-textcolor2" />
+                <span class="min-w-0 flex-1">AI 연결 · 모델 · API 키</span>
+                <ChevronRightIcon size={16} class="shrink-0 text-textcolor2" />
+            </button>
+            <button type="button" class="easy-link" data-easy-open-migration onclick={() => openSettings(SettingsRoute.Migration)}>
+                <ArchiveRestoreIcon size={18} class="shrink-0 text-textcolor2" />
+                <span class="min-w-0 flex-1">기존 리스 데이터 가져오기 (.bin 백업)</span>
+                <ChevronRightIcon size={16} class="shrink-0 text-textcolor2" />
+            </button>
+            <button type="button" class="easy-link" data-easy-open-settings onclick={() => openSettings(SettingsRoute.None)}>
+                <SettingsIcon size={18} class="shrink-0 text-textcolor2" />
+                <span class="min-w-0 flex-1">전체 설정 열기</span>
+                <ChevronRightIcon size={16} class="shrink-0 text-textcolor2" />
+            </button>
+        </div>
+    </section>
+
     <section aria-labelledby="easy-skin-title">
         <h3 id="easy-skin-title" class="text-base font-bold">앱 스킨</h3>
         <p class="mt-1 text-sm text-textcolor2">스킨은 간편 모드와 기존 화면에 똑같이 적용돼요. .risuskin 파일도 가져올 수 있어요.</p>
@@ -157,5 +179,20 @@
     }
     .easy-action:hover {
         border-color: var(--color-borderc);
+    }
+    .easy-link {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        min-height: 3rem;
+        padding: 0.6rem 0.9rem;
+        text-align: start;
+        font-size: 0.9rem;
+    }
+    .easy-link + .easy-link {
+        border-top: 1px solid var(--color-darkborderc);
+    }
+    .easy-link:hover {
+        background: var(--color-selected);
     }
 </style>
