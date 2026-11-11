@@ -48,7 +48,8 @@ import {
     type MemoryAnalysisMessage,
 } from "../risubard/memoryAnalysisClient";
 import { enqueueNarrativeConfirmation, narrativeConfirmationsSettled } from '../risubard/narrativeConfirmationQueue';
-import { groupNarrativeBacklog, NARRATIVE_BACKLOG_TURNS_PER_RUN, withoutRepeatedMessages } from '../risubard/narrativeBacklogBatch';
+import { groupNarrativeBacklog, NARRATIVE_BACKLOG_TURNS_PER_RUN, narrativeAnalysisDue, withoutRepeatedMessages } from '../risubard/narrativeBacklogBatch';
+import { wikiBacklogMessages } from '../risubard/wikiBacklog';
 import { projectActiveNarrativeSources } from "../risubard/sourceProjection";
 import {
     createNarrativeSourcesPrompt,
@@ -61,6 +62,7 @@ import {
     selectPromptedNarrativeSources,
     selectNarrativeWorkingMessages,
     shouldIncludeNarrativeFirstMessage,
+    cacheStableWorkingMessageStep,
     countNarrativeTurns,
 } from "../risubard/narrativeContext";
 import {
@@ -121,6 +123,9 @@ import {
     buildSourceRerankInput, buildSourceRerankPool, parseSourceRerank,
     SOURCE_RERANK_POOL_LIMIT, SOURCE_RERANK_SCHEMA, SOURCE_RERANK_SYSTEM_PROMPT,
 } from '../risubard/historicalSourceRerank';
+import { normalizeRisuBardSourceRerankerSettings, rerankSourcesWithApi } from '../risubard/sourceRerankerApi';
+import { globalFetch } from '../globalApi.svelte';
+import { isLocalNetworkUrl } from '../network/localNetwork';
 import {
     buildInquiryTimeline,
     findHistoricalSourceMatches,
@@ -559,6 +564,26 @@ function processNarrativeBacklog(input: {
         if (narrativeBacklogRuns.get(key) === settled) narrativeBacklogRuns.delete(key)
     })
     return run
+}
+
+/** Queues a new turn and analyzes the backlog once the chat's turn interval is reached. */
+function queueNarrativeTurn(input: {
+    characterId: string
+    chatId: string
+    targetMessageId: string
+}): void {
+    const chat = DBState.db.characters.find((item) => item.chaId === input.characterId)
+        ?.chats.find((item) => item.id === input.chatId)
+    const target = findNarrativeMessage(input.characterId, input.chatId, input.targetMessageId)
+    if (chat && target && target.risubardMemoryConfirmed !== true) {
+        const interval = resolvedRisuBardSettings(chat).risuBardAnalysisTurnInterval
+        if (interval > 1) {
+            target.risubardWikiPending ??= {}
+            const waiting = wikiBacklogMessages(chat.message, input.targetMessageId, true).length
+            if (!narrativeAnalysisDue(waiting, interval)) return
+        }
+    }
+    void processNarrativeBacklog(input)
 }
 
 async function runNarrativeBacklog(input: {
@@ -2284,7 +2309,16 @@ export async function sendChat(chatProcessIndex = -1,arg:{
                                 findHistoricalSourceMatches({ ...historicalOptions, maximumMatches: SOURCE_RERANK_POOL_LIMIT,
                                     currentInput, messages: currentChat.message }),
                             )
-                            const rankedSourceIds = pool.length === 0 ? [] : parseSourceRerank(readModelResponseText(
+                            const reranker = normalizeRisuBardSourceRerankerSettings(DBState.db.risuBardSourceReranker)
+                            const rankedSourceIds = pool.length === 0 ? [] : reranker.method === 'reranker'
+                                ? await rerankSourcesWithApi(currentInput, pool, reranker, (url, init) => globalFetch(url, {
+                                    ...init,
+                                    ...(isLocalNetworkUrl(url) ? { networkRoute: 'local_network' as const } : {}),
+                                    logCategory: 'other',
+                                    logSource: 'memory',
+                                    logPurpose: 'bardwiki-source-rerank',
+                                }), arg.signal)
+                                : parseSourceRerank(readModelResponseText(
                                 await requestWithProviderOutputLimit({
                                     formated: [
                                         { role: 'system' as const, content: SOURCE_RERANK_SYSTEM_PROMPT },
@@ -2293,7 +2327,8 @@ export async function sendChat(chatProcessIndex = -1,arg:{
                                     useStreaming: false,
                                     noMultiGen: true,
                                     tools: [],
-                                    maxTokens: 512,
+                                    // Thinking models spend reasoning tokens from this limit; a fixed 512 cut them off before the JSON.
+                                    maxTokens: inquirySettings.risuBardAnalysisTokenLimit,
                                     temperature: 0,
                                     bias: {},
                                     extractJson: '',
@@ -2859,6 +2894,9 @@ export async function sendChat(chatProcessIndex = -1,arg:{
         normalizeNarrativeWorkingMessageLimit(
             resolvedRisuBardSettings(currentChat).risuBardResponseMessageCount
         )
+    const narrativeWorkingMessageStep = cacheFriendlyContext
+        ? cacheStableWorkingMessageStep(narrativeWorkingMessageLimit)
+        : 1
     ms = selectNarrativeWorkingMessages(
         ms,
         narrativeWorkingMessageLimit,
@@ -2868,12 +2906,14 @@ export async function sendChat(chatProcessIndex = -1,arg:{
             ...Object.keys(currentChat.GLGlobalVariables ?? {}),
             ...Object.keys(DBState.db.globalChatVariables ?? {}),
         ], (key) => getGlobalChatVar(key, currentChat)) !== false,
+        narrativeWorkingMessageStep,
     )
     narrativeContextObservation.selectedHistoryMessages = ms.length
 
     if(shouldIncludeNarrativeFirstMessage(
             narrativeContextObservation.availableHistoryMessages,
-            narrativeWorkingMessageLimit
+            narrativeWorkingMessageLimit,
+            narrativeWorkingMessageStep
         )){
         await addFirstMessage()
     }
@@ -4256,7 +4296,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{
             requestSettings.risuBardAutoWikiEnabled
         )) {
         // Turns that failed before stay queued and go first, in story order.
-        void processNarrativeBacklog({
+        queueNarrativeTurn({
             characterId: currentChar.chaId,
             chatId: narrativeSessionChatId,
             targetMessageId: narrativeTurnToConfirm.targetMessageId,

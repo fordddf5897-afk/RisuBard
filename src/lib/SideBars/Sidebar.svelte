@@ -700,7 +700,7 @@
 {#if DBState.db.menuSideBar}
 <div
   data-skin-part="sidebar-rail"
-  class="h-full w-20 min-w-20 flex-col items-center bg-bgcolor text-textcolor shadow-lg relative rs-sidebar"
+  class="h-full w-20 min-w-20 flex-col items-center bg-bgcolor text-textcolor shadow-lg relative isolate rs-sidebar"
   class:editMode
   class:risu-sub-sidebar={$sideBarClosing}
   class:risu-sub-sidebar-close={$sideBarClosing}
@@ -778,7 +778,7 @@
   bind:this={characterListSidebarElement}
   data-character-list-sidebar
   data-skin-part="sidebar-rail"
-  class="character-list-sidebar h-full min-w-20 shrink-0 flex-col items-center bg-bgcolor text-textcolor shadow-lg relative rs-sidebar"
+  class="character-list-sidebar h-full min-w-20 shrink-0 flex-col items-center bg-bgcolor text-textcolor shadow-lg relative isolate rs-sidebar"
   style:width={characterListSidebarWidth}
   class:max-xs:hidden={$leftBarCollapsed}
   class:editMode
@@ -1544,7 +1544,8 @@
   {/if}
   </div>
   {#if $selectedCharID >= 0}
-    <SidebarResizeHandle axis="width" target={sidebarElement} maxWidth={sidebarMaxWidth} />
+    <!-- In flow: an isolated panel would trap the dialogs opened from it (model pickers) behind the chat screen. -->
+    <SidebarResizeHandle axis="width" target={sidebarElement} maxWidth={sidebarMaxWidth} inFlow />
   {/if}
 </div>
 
