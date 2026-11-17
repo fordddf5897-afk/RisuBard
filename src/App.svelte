@@ -1,6 +1,9 @@
 <script lang="ts">
     import { DynamicGUI, settingsOpen, sideBarStore, openPresetList, openModelPresetList, openModelProfileBrowser, openPersonaList, openPersonaManager, personaSelectCallback, openHypaV3PresetList, openThemePresetList, MobileGUI, loadedStore, alertStore, LoadingStatusState, bookmarkListOpen, popupStore, popUpEditorStore, promptAssistantOpen, characterAssistantOpen, readerBoardOpen } from './ts/stores.svelte';
     import Sidebar from './lib/SideBars/Sidebar.svelte';
+    // easy-mode: Eden-style home/work/chat shell (src/lib/EasyMode)
+    import EasyModeShell from './lib/EasyMode/EasyModeShell.svelte';
+    import { easyModeEnabled } from './ts/easyMode/state.svelte';
     import { DBState } from './ts/stores.svelte';
     import { accountImportBlocking } from './ts/stores.svelte';
     import RisuAccountImportScreen from './lib/Setting/RisuAccountImportScreen.svelte';
@@ -48,9 +51,6 @@
     import RequestStatusToaster from './lib/UI/GUI/RequestStatusToaster.svelte';
     import { createKeepAliveAudio } from './ts/keepAliveAudio';
     import { RISU_APP_INTERNAL_DRAG_TYPE, RISU_SIDEBAR_DRAG_TYPE } from './ts/dragTypes';
-    // easy-mode: Eden-style home/work/chat shell (src/lib/EasyMode)
-    import EasyModeShell from './lib/EasyMode/EasyModeShell.svelte';
-    import { easyModeEnabled } from './ts/easyMode/state.svelte';
 
     let gridOpen = $state(false)
     let aprilFools = $state(new Date().getMonth() === 3 && new Date().getDate() === 1)
