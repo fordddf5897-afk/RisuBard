@@ -26,6 +26,7 @@ function client(base, password = 'test1234') {
     const headers = (extra = {}) => ({ 'risu-auth': token, 'x-session-id': sessionId, 'x-user-active': '1', ...extra });
     const api = {
         sessionId,
+        headers,
         async login() {
             // A server restart leaves dead pooled connections behind; the first call may hit one.
             for (let attempt = 0; attempt < 5; attempt++) {

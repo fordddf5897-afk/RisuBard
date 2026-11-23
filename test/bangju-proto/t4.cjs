@@ -12,7 +12,7 @@ const keys = () => Object.keys(JSON.parse(fs.readFileSync(path.join(root, 'kv/ma
     let tab = await client(base).login();
     const db0 = (await tab.readDb()).db;
     const list0 = (await tab.get('/api/bangju/archive')).json;
-    const a = list0.active.find(c => c.name === 'Bot 0002'), b = list0.active.find(c => c.name === 'Bot 0009');
+    const a = list0.active.find(c => c.name.startsWith('Bot 0002')), b = list0.active.find(c => c.name.startsWith('Bot 0009'));
     const archiveRoot = path.join(root, 'bangju/archive');
 
     // 1) Stopped right after a folder was renamed into the archive: journal still there, index and server list not updated.
@@ -24,9 +24,9 @@ const keys = () => Object.keys(JSON.parse(fs.readFileSync(path.join(root, 'kv/ma
     console.log('    ', start());
     tab = await client(base).login();
     const db1 = await tab.readDb();
-    ok('server starts and reads its list from the folders', db1.status === 200 && db1.db.characters.length === db0.characters.length - 1 && !db1.db.characters.some(c => c.name === 'Bot 0002') && db1.db.characters.some(c => c.name === 'Bot 0009'), `characters ${db1.db?.characters?.length ?? db1.body}`);
+    ok('server starts and reads its list from the folders', db1.status === 200 && db1.db.characters.length === db0.characters.length - 1 && !db1.db.characters.some(c => c.name.startsWith('Bot 0002')) && db1.db.characters.some(c => c.name === 'Bot 0009'), `characters ${db1.db?.characters?.length ?? db1.body}`);
     const list1 = (await tab.get('/api/bangju/archive')).json;
-    ok('archive list rebuilt from the folders', list1.totals.archived === 1 && list1.archived[0].name === 'Bot 0002' && list1.archived[0].id === a.id, JSON.stringify(list1.archived.map(x => ({ name: x.name, id: x.id === a.id }))));
+    ok('archive list rebuilt from the folders', list1.totals.archived === 1 && list1.archived[0].name.startsWith('Bot 0002') && list1.archived[0].id === a.id, JSON.stringify(list1.archived.map(x => ({ name: x.name, id: x.id === a.id }))));
     ok('journal cleared', !fs.existsSync(path.join(archiveRoot, 'journal.json')));
     const everywhere = id => [fs.existsSync(path.join(root, 'characters', id)), fs.existsSync(path.join(archiveRoot, 'characters', id))];
     ok('each bot is in exactly one place', everywhere(a.id).filter(Boolean).length === 1 && everywhere(b.id).filter(Boolean).length === 1);

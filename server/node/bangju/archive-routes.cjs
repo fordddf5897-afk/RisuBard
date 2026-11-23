@@ -81,6 +81,30 @@ function registerBangjuArchiveRoutes(app, {
         res.set('Cache-Control', 'no-store').type('html').send(fs.readFileSync(testPagePath));
     });
 
+    // 마지막으로 옮긴 결과를 남겨 둔다. 오래 걸려서 화면과의 연결이 끊기거나 창을
+    // 닫아도, 다시 열면 결과(걸린 시간 등)를 볼 수 있다.
+    const lastRunPath = path.join(archive.archiveRoot, 'last-run.json');
+    let running = null;
+    let queued = 0;
+    function rememberRun(run) {
+        try {
+            fs.mkdirSync(archive.archiveRoot, { recursive: true });
+            fs.writeFileSync(lastRunPath, JSON.stringify(run));
+        } catch (error) {
+            logger?.warn?.('[Bangju archive] Could not record the last run', error);
+        }
+    }
+    function readLastRun() {
+        try { return JSON.parse(fs.readFileSync(lastRunPath, 'utf8')); } catch { return null; }
+    }
+    const activeCount = () => (repository.loadSidebarIndex().characters || []).length;
+
+    // Not queued on purpose: it must answer while a move is waiting in the queue.
+    app.get('/api/bangju/archive/status', async (req, res) => {
+        if (!await auth(req, res)) return;
+        res.set('Cache-Control', 'no-store').json({ running, queued, last: readLastRun() });
+    });
+
     // Moves folders one way and keeps the list order information in step.
     function moveFolders(ids, direction) {
         const listed = repository.loadSidebarIndex().characters || [];
@@ -126,12 +150,25 @@ function registerBangjuArchiveRoutes(app, {
         if (!Array.isArray(ids) || !ids.length || ids.length > 5000 || (direction !== 'archive' && direction !== 'restore')) {
             return res.status(400).json({ error: 'ids and direction (archive or restore) are required' });
         }
+        // The page names each request, so it can find this run's result again after a lost connection.
+        const runId = typeof req.body.runId === 'string' && req.body.runId.length <= 80 ? req.body.runId : null;
+        const receivedAt = performance.now();
+        let mine = null;
+        queued += 1;
+        // Answers the browser and records the same thing as the last run.
+        const finish = (status, body) => {
+            const run = { runId, direction, requested: ids.length, ...body, totalMs: elapsed(receivedAt), finishedAt: new Date().toISOString() };
+            rememberRun(run);
+            if (!res.headersSent) res.status(status).json(run);
+        };
         try {
             await queue(async () => {
                 const timings = {};
                 if (isBlocked()) {
                     return res.status(409).json({ code: 'BANGJU_ARCHIVE_BUSY', error: 'Storage is busy; try again shortly' });
                 }
+                mine = { runId, direction, requested: ids.length, startedAt: new Date().toISOString() };
+                running = mine;
                 let startedAt = performance.now();
                 // Edits the browser already sent must reach the bot folders before they move.
                 await flush();
@@ -139,6 +176,7 @@ function registerBangjuArchiveRoutes(app, {
                 if (isBlocked() || hasExternalChanges()) {
                     return res.status(409).json({ code: 'BANGJU_ARCHIVE_BUSY', error: 'Files changed outside the app; review them first' });
                 }
+                const before = { databaseBytes: databaseBytes(), active: activeCount() };
                 startedAt = performance.now();
                 const result = moveFolders(ids, direction);
                 timings.moveMs = elapsed(startedAt);
@@ -154,7 +192,8 @@ function registerBangjuArchiveRoutes(app, {
                         const back = moveFolders(result.moved, direction === 'archive' ? 'restore' : 'archive');
                         try { await adopt(); } catch { /* the next page load reloads the list again */ }
                         logger?.error?.('[Bangju archive] Reload failed; folders were moved back', error);
-                        return res.status(500).json({
+                        return finish(500, {
+                            status: 'rolled-back',
                             code: 'BANGJU_ARCHIVE_ROLLED_BACK',
                             error: `목록을 다시 읽지 못해 원래대로 되돌렸습니다: ${String(error?.message || error)}`,
                             rolledBack: back.moved.length, notRolledBack: back.failed,
@@ -163,19 +202,24 @@ function registerBangjuArchiveRoutes(app, {
                     timings.adoptMs = elapsed(startedAt);
                     // Every open tab still holds the old list.
                     revokeSessions();
-                    logger?.info?.(`[Bangju archive] ${direction} ${result.moved.length} bot(s)`);
                 }
-                res.json({
-                    direction, moved: result.moved, failed: result.failed, assets: result.assets,
+                const after = { databaseBytes: databaseBytes(), active: activeCount() };
+                logger?.info?.(`[Bangju archive] ${direction} ${result.moved.length} bot(s), failed ${result.failed.length}; `
+                    + `flush ${timings.flushMs}ms, move ${timings.moveMs}ms, reload ${timings.adoptMs || 0}ms; `
+                    + `opened file ${before.databaseBytes} -> ${after.databaseBytes} bytes; active ${before.active} -> ${after.active}`);
+                finish(200, {
+                    status: 'done',
+                    moved: result.moved, failed: result.failed, assets: result.assets,
                     adopted: Boolean(adopted), etag: adopted?.etag ?? null,
-                    databaseBytes: databaseBytes(), timings,
+                    databaseBytes: after.databaseBytes, before, after, timings,
                 });
             });
         } catch (error) {
             logger?.error?.('[Bangju archive] Move failed', error);
-            if (!res.headersSent) {
-                res.status(500).json({ code: 'BANGJU_ARCHIVE_FAILED', error: String(error?.message || error) });
-            }
+            finish(500, { status: 'failed', code: 'BANGJU_ARCHIVE_FAILED', error: String(error?.message || error) });
+        } finally {
+            queued -= 1;
+            if (mine && running === mine) running = null;
         }
     });
 

@@ -35,6 +35,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await page.click('#moveButton');
     await page.waitForFunction(() => /불러오기 2개 완료/.test(document.getElementById('result').innerText), { timeout: 30000 });
     console.log('result after restore:', (await text('#result')).replace(/\n/g, ' / '));
+    // Reopening the page shows the last result again (kept on the server).
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.type('#password', 'test1234');
+    await page.click('#loginButton');
+    await page.waitForFunction(() => /마지막 작업/.test(document.getElementById('result').innerText), { timeout: 15000 });
+    console.log('after reopening:', (await text('#result')).split('\n').slice(0, 2).join(' / '));
+    console.log('version line:', await text('#version'));
     console.log('page errors:', errors.length ? errors : 'none');
     await browser.close();
 })().catch(e => { console.error('PAGE TEST FAILED', e.message); process.exit(1); });
