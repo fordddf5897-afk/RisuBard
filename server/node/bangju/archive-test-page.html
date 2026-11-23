@@ -137,9 +137,9 @@
 
   function render() {
     const t = data.totals;
-    $('totals').innerHTML = '쓰는 것 <b>' + t.active + '개</b> · 글 데이터 합계 <b>' + mb(t.activeCardBytes) + '</b><br>'
-      + '앱을 열 때 받는 파일 <b>' + mb(t.databaseBytes) + '</b><br>'
-      + '보관함 <b>' + t.archived + '개</b> · ' + mb(t.archivedCardBytes);
+    $('totals').innerHTML = '쓰는 것 <b>' + t.active + '개</b> · 글 데이터 합계 <b>' + mb(t.activeCardBytes) + '</b> (앱을 열 때 받는 양과 거의 같음)<br>'
+      + '보관함 <b>' + t.archived + '개</b> · 글 데이터 합계 ' + mb(t.archivedCardBytes) + '<br>'
+      + '<span class="note">서버 보관 사본(채팅 포함) ' + mb(t.databaseBytes) + '</span>';
     $('tabActive').setAttribute('aria-selected', String(tab === 'active'));
     $('tabArchived').setAttribute('aria-selected', String(tab === 'archived'));
     $('moveButton').textContent = tab === 'active' ? '고른 것 보관하기' : '고른 것 불러오기';
@@ -187,7 +187,7 @@
     const lines = [
       word + ' ' + run.moved.length + '개 완료, 실패 ' + run.failed.length + '개',
       '걸린 시간: ' + ((run.totalMs || 0) / 1000).toFixed(1) + '초 (저장 정리 ' + (t.flushMs || 0) + 'ms, 폴더 옮기기 ' + (t.moveMs || 0) + 'ms, 목록 다시 읽기 ' + (t.adoptMs || 0) + 'ms)',
-      '앱을 열 때 받는 파일: ' + mb(run.before.databaseBytes) + ' → ' + mb(run.after.databaseBytes),
+      '서버 보관 사본(채팅 포함): ' + mb(run.before.databaseBytes) + ' → ' + mb(run.after.databaseBytes),
       '쓰는 것: ' + run.before.active + '개 → ' + run.after.active + '개',
       '그림 보호: ' + JSON.stringify(run.assets),
     ];

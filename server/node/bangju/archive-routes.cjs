@@ -181,7 +181,11 @@ function registerBangjuArchiveRoutes(app, {
                 const result = moveFolders(ids, direction);
                 timings.moveMs = elapsed(startedAt);
                 let adopted = null;
-                if (result.moved.length) {
+                // 실험용 스위치(B1 설계 조사): 목록 다시 읽기를 여기서 하지 않고, 앱이 다음에
+                // 열릴 때 서버가 스스로 하게 둔다. 열려 있던 탭은 그대로 낡은 것으로 만든다.
+                if (result.moved.length && process.env.BANGJU_ARCHIVE_LAZY === '1') {
+                    revokeSessions();
+                } else if (result.moved.length) {
                     startedAt = performance.now();
                     try {
                         // 검증 스크립트가 되돌리기 경로를 시험할 때만 쓰는 스위치.

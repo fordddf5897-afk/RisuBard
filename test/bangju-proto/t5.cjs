@@ -37,7 +37,7 @@ const timed = async fn => { const t = Date.now(); const value = await fn(); retu
     ok(`restore ${ids.length} bots in one call`, res.value.status === 200 && res.value.json.moved.length === ids.length, `took ${res.s}s, server timings ${JSON.stringify(res.value.json?.timings)}`);
     tab = await client(base).login();
     const read2 = await timed(() => tab.readDb());
-    ok('everything is back', read2.value.db.characters.length === 1151, `characters ${read2.value.db.characters.length}, file ${mb(read2.value.bytes)}, read took ${read2.s}s`);
+    ok('everything is back', read2.value.db.characters.length === L0.totals.active + 1, `characters ${read2.value.db.characters.length}, file ${mb(read2.value.bytes)}, read took ${read2.s}s`);
     const order0 = L0.active.map(c => c.name).join('|');
     const order2 = read2.value.db.characters.filter(c => c.name !== added.name).map(c => c.name).join('|');
     ok('bots are back in their original order', order0 === order2);

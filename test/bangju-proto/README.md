@@ -29,5 +29,6 @@ node t4.cjs http://127.0.0.1:7801 /tmp/bangju-a 7801 /tmp/bangju-a.log   # 옮�
 | `t6.cjs` | 시험용 '봇 추가' 요청이 내는 경고가 보관함과 무관한지 확인 |
 | `t7.cjs` | 목록 다시 읽기가 실패하면 폴더를 전부 되돌리는지. 서버를 `BANGJU_ARCHIVE_TEST_FAIL_RELOAD=1`로 켜고 돌림 |
 | `t8.cjs` | 마지막 옮긴 결과가 서버에 남는지(`/api/bangju/archive/status`). 답을 받기 전에 연결이 끊겨도 결과를 다시 읽을 수 있는지 |
+| (실험) `BANGJU_ARCHIVE_LAZY=1` | 서버를 이 값으로 켜면 옮긴 뒤 목록 다시 읽기를 바로 하지 않고, 앱이 다음에 열릴 때 서버가 하게 둔다(B1 설계 조사용). t1의 '바로 줄었는가' 두 항목은 이 방식에서는 뜻이 없어 실패로 나온다 |
 | `probe.cjs`, `probe2.cjs` | 시작 읽기 확인, 앱 전체 백업에 들어가는 파일 목록 |
 | `page-test.cjs` | 시험 화면(`/bangju/archive`)을 실제 브라우저로 조작. `puppeteer-core`와 Chrome이 따로 필요 |
