@@ -1,0 +1,73 @@
+name: Bangju - test image
+
+# 방주 시험용 설치본을 만듭니다. Actions 탭에서 직접 실행하고, 설치본으로 만들 가지 이름을 적습니다.
+# 결과는 ghcr.io/<아이디>/<저장소>:bangju-test 로 올라갑니다. 본체가 쓰는 :latest 는 건드리지 않습니다.
+# 사본 데이터를 쓰는 시험용 방주에서만 쓰세요.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: '설치본으로 만들 가지 이름 (예: bangju/b1-archive-proto)'
+        required: true
+        type: string
+
+concurrency:
+  group: bangju-test-image
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  image:
+    name: Build test image
+    # Only forks build this.
+    if: github.repository != 'rpaddict/RisuBard'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Names
+        id: names
+        shell: bash
+        run: echo "image=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ steps.names.outputs.image }}:bangju-test
+          # Reads the main image's build cache; never writes to it.
+          cache-from: type=gha,scope=easy-linux-amd64
+
+      - name: Summary
+        shell: bash
+        env:
+          REF: ${{ inputs.ref }}
+          IMAGE: ${{ env.REGISTRY }}/${{ steps.names.outputs.image }}
+        run: |
+          {
+            echo "시험용 설치본을 올렸습니다."
+            echo ""
+            echo "- 가지: \`${REF}\` ($(git rev-parse --short HEAD))"
+            echo "- 이미지: \`${IMAGE}:bangju-test\`"
+          } >> "$GITHUB_STEP_SUMMARY"
