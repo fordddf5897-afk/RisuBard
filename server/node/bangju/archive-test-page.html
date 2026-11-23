@@ -87,7 +87,11 @@
   async function login() {
     $('loginError').textContent = '';
     try {
-      const response = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: $('password').value }) });
+      // 앱과 같은 방식: 비밀번호를 그대로 보내지 않고, 서버가 만들어 준 요약값을 보낸다.
+      const digested = await fetch('/api/crypto', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data: $('password').value }) });
+      if (!digested.ok) throw new Error('비밀번호를 확인하지 못했습니다 (' + digested.status + ').');
+      const response = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: await digested.text() }) });
+      if (response.status === 429) throw new Error('시도가 너무 많았습니다. 잠시 뒤에 다시 해 주세요.');
       const json = await response.json();
       if (!json.token) throw new Error('비밀번호가 맞지 않습니다.');
       token = json.token;

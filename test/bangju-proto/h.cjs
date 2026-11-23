@@ -31,8 +31,10 @@ function client(base, password = 'test1234') {
             for (let attempt = 0; attempt < 5; attempt++) {
                 try { await rfetch(`${base}/api/test_auth`); break; } catch { await new Promise(r => setTimeout(r, 300)); }
             }
-            await rfetch(`${base}/api/set_password`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password }) });
-            const r = await rfetch(`${base}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password }) });
+            // Like the app: the password is sent as the digest the server computes for it.
+            const digest = await (await rfetch(`${base}/api/crypto`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data: password }) })).text();
+            await rfetch(`${base}/api/set_password`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: digest }) });
+            const r = await rfetch(`${base}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: digest }) });
             token = (await r.json()).token;
             if (!token) throw new Error('login failed');
             const session = await rfetch(`${base}/api/session`, { method: 'POST', headers: headers() });
