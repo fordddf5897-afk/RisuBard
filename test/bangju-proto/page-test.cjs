@@ -35,6 +35,31 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await page.click('#moveButton');
     await page.waitForFunction(() => /불러오기 2개 완료/.test(document.getElementById('result').innerText), { timeout: 30000 });
     console.log('result after restore:', (await text('#result')).replace(/\n/g, ' / '));
+    // An expired login token: the server refuses the first move request; the page must renew the token and retry.
+    await page.setRequestInterception(true);
+    let refused = 0, renewed = 0;
+    const onRequest = request => {
+        if (request.url().endsWith('/api/token/refresh')) renewed += 1;
+        if (request.url().endsWith('/api/bangju/archive/move') && refused === 0) {
+            refused += 1;
+            return request.respond({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'Token Expired' }) });
+        }
+        request.continue();
+    };
+    page.on('request', onRequest);
+    await page.click('#tabActive');
+    await sleep(200);
+    await page.$$eval('#list .row input', boxes => { boxes[0].click(); });
+    await page.click('#moveButton');
+    await page.waitForFunction(() => /보관 1개 완료/.test(document.getElementById('result').innerText), { timeout: 30000 });
+    console.log('expired token: refused', refused, '| renewed', renewed, '| then:', (await text('#result')).split('\n')[0]);
+    await page.click('#tabArchived');
+    await sleep(200);
+    await page.click('#selectAll');
+    await page.click('#moveButton');
+    await page.waitForFunction(() => /불러오기 1개 완료/.test(document.getElementById('result').innerText), { timeout: 30000 });
+    page.off('request', onRequest);
+    await page.setRequestInterception(false);
     // Reopening the page shows the last result again (kept on the server).
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.type('#password', 'test1234');

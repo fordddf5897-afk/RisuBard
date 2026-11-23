@@ -74,7 +74,18 @@
   const mb = bytes => (bytes / 1048576).toFixed(bytes < 10485760 ? 2 : 1) + 'MB';
   let token = null, data = null, tab = 'active', picked = new Set(), busy = false;
 
-  async function call(url, body) {
+  // 서버의 로그인표는 5분짜리다. 앱처럼 만료된 표로 새 표를 받아 온다.
+  async function renewToken() {
+    if (!token) return false;
+    try {
+      const response = await fetch('/api/token/refresh', { method: 'POST', headers: { 'risu-auth': token } });
+      const json = await response.json();
+      if (response.ok && json && json.token) { token = json.token; return true; }
+    } catch {}
+    return false;
+  }
+
+  async function call(url, body, retried) {
     const response = await fetch(url, {
       method: body ? 'POST' : 'GET',
       headers: { 'risu-auth': token, ...(body ? { 'content-type': 'application/json' } : {}) },
@@ -82,6 +93,8 @@
     });
     const text = await response.text();
     let json = null; try { json = JSON.parse(text); } catch {}
+    // 표가 만료돼 거절된 요청은 아직 아무 일도 하지 않았다: 새 표로 한 번 더 보낸다.
+    if (!response.ok && json && json.error === 'Token Expired' && !retried && await renewToken()) return call(url, body, true);
     if (!response.ok) throw new Error((json && json.error) || text.slice(0, 200) || ('오류 ' + response.status));
     return json;
   }
@@ -97,6 +110,7 @@
       const json = await response.json();
       if (!json.token) throw new Error('비밀번호가 맞지 않습니다.');
       token = json.token;
+      setInterval(renewToken, 3 * 60 * 1000);
       $('login').classList.add('hidden');
       $('main').classList.remove('hidden');
       await refresh();
@@ -215,8 +229,10 @@
         if (!run) throw new Error('서버와 연결이 끊겨 결과를 받지 못했습니다. 이 화면을 새로 고쳐 보세요.');
       }
       clearInterval(timer);
-      await refresh();
-      $('result').textContent = describeRun(run).join('\n');
+      const lines = describeRun(run);
+      $('result').textContent = lines.join('\n');
+      try { await refresh(); }
+      catch (error) { $('result').textContent = lines.concat('(목록을 새로 고치지 못했습니다: ' + error.message + ' — 화면을 새로 고쳐 주세요.)').join('\n'); }
     } catch (error) {
       clearInterval(timer);
       $('result').textContent = '실패: ' + error.message + '\n(시험용 사본이라 진짜 데이터에는 영향이 없습니다.)';
