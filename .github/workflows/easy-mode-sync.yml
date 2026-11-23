@@ -32,6 +32,8 @@ env:
   UPSTREAM_URL: https://github.com/rpaddict/RisuBard.git
   UPSTREAM_BRANCH: main
   REGISTRY: ghcr.io
+  # onnxruntime-node 1.21.0's Linux CUDA download now returns 404; the app uses the CPU build.
+  ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
 jobs:
   sync:
