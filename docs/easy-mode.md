@@ -74,7 +74,7 @@ src/ts/easyMode/           로직
 deploy/synology/           시놀로지 compose, 자동 업데이트 스크립트(update.sh), 안내
 deploy/easy-ci-sync.sh     RisuBard 새 버전 병합 (자동/수동 공용)
 deploy/easy-ci-check.sh    간편 모드 검사 (자동/수동 공용)
-.github/workflows/easy-mode-sync.yml  매일 병합 · 검사 · 이미지 빌드
+.github/workflows/easy-mode-sync.yml  검사 · 이미지 빌드 (병합은 직접 실행할 때만)
 deploy/easy-sync-upstream.sh  원본 업데이트 병합 스크립트
 ```
 
@@ -93,7 +93,9 @@ deploy/easy-sync-upstream.sh  원본 업데이트 병합 스크립트
 
 ### 업데이트 받는 법
 
-**자동**: `.github/workflows/easy-mode-sync.yml`이 매일 04:23(한국 시간)에 RisuBard 최신 버전을 합치고, 아래 검사를 통과하면 Docker 이미지(`ghcr.io/<아이디>/<저장소>:latest`)를 만듭니다. NAS는 `deploy/synology/update.sh`로 새 이미지를 받습니다. 설정은 `deploy/synology/README.ko.md`를 보세요.
+**버전 고정**: RisuBard 새 버전은 자동으로 합치지 않습니다. `main`에 올리면 `.github/workflows/easy-mode-sync.yml`이 합치지 않고 아래 검사만 돌린 뒤, 통과하면 Docker 이미지(`ghcr.io/<아이디>/<저장소>:latest`)를 만듭니다. NAS는 `deploy/synology/update.sh`로 새 이미지를 받습니다. 설정은 `deploy/synology/README.ko.md`를 보세요.
+
+**GitHub에서 합치기**: Actions 탭에서 같은 작업을 직접 실행하면서 "RisuBard 새 버전 합치기"를 체크합니다. RisuBard 최신 버전을 합치고, 검사를 통과하면 이미지를 만듭니다.
 
 - 충돌이나 검사 실패가 있으면 아무것도 올리지 않고 실행이 실패로 끝나며, 실행 요약에 충돌 파일과 고치는 법이 적힙니다.
 - 병합 판단은 `deploy/easy-ci-sync.sh`, 검사는 `deploy/easy-ci-check.sh`가 합니다.
