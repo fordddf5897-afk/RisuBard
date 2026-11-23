@@ -1,7 +1,8 @@
 name: Bangju - test image
 
 # 방주 시험용 설치본을 만듭니다. Actions 탭에서 직접 실행하고, 설치본으로 만들 가지 이름을 적습니다.
-# 결과는 ghcr.io/<아이디>/<저장소>:bangju-test 로 올라갑니다. 본체가 쓰는 :latest 는 건드리지 않습니다.
+# 결과는 ghcr.io/<아이디>/<저장소>:bangju-test 와 :bangju-test-<커밋> 으로 올라갑니다.
+# 본체가 쓰는 :latest 는 건드리지 않습니다.
 # 사본 데이터를 쓰는 시험용 방주에서만 쓰세요.
 
 on:
@@ -39,6 +40,16 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
+      # The running test build can report this at /api/bangju/version.
+      - name: Build info
+        id: info
+        shell: bash
+        run: |
+          short=$(git rev-parse --short HEAD)
+          echo "short=$short" >> "$GITHUB_OUTPUT"
+          mkdir -p server/node/bangju
+          printf '{"commit":"%s","builtAt":"%s"}\n' "$short" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > server/node/bangju/build-info.json
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -55,7 +66,10 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          tags: ${{ env.REGISTRY }}/${{ steps.names.outputs.image }}:bangju-test
+          # The second tag never moves, so a compose file naming it always gets this exact build.
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.names.outputs.image }}:bangju-test
+            ${{ env.REGISTRY }}/${{ steps.names.outputs.image }}:bangju-test-${{ steps.info.outputs.short }}
           # Reads the main image's build cache; never writes to it.
           cache-from: type=gha,scope=easy-linux-amd64
 
@@ -69,5 +83,5 @@ jobs:
             echo "시험용 설치본을 올렸습니다."
             echo ""
             echo "- 가지: \`${REF}\` ($(git rev-parse --short HEAD))"
-            echo "- 이미지: \`${IMAGE}:bangju-test\`"
+            echo "- 이미지: \`${IMAGE}:bangju-test\`, \`${IMAGE}:bangju-test-$(git rev-parse --short HEAD)\`"
           } >> "$GITHUB_STEP_SUMMARY"
