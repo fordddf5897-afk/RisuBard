@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>방주 보관함 (시험용)</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; padding: 12px; max-width: 760px; margin-inline: auto; }
+  h1 { font-size: 18px; margin: 4px 0 2px; }
+  .note { color: #888; font-size: 13px; margin: 0 0 10px; }
+  .box { border: 1px solid #8884; border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
+  .totals b { font-size: 17px; }
+  .tabs { display: flex; gap: 6px; margin-top: 12px; }
+  .tabs button { flex: 1; padding: 9px; border-radius: 8px; border: 1px solid #8886; background: transparent; color: inherit; font: inherit; }
+  .tabs button[aria-selected=true] { background: #4a7dff; border-color: #4a7dff; color: #fff; }
+  .bar { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 6px; }
+  .bar input[type=search] { flex: 1 1 160px; min-width: 0; }
+  input, select, button { font: inherit; padding: 7px 9px; border-radius: 8px; border: 1px solid #8886; background: transparent; color: inherit; }
+  button.primary { background: #4a7dff; border-color: #4a7dff; color: #fff; }
+  button:disabled { opacity: .45; }
+  .list { border: 1px solid #8884; border-radius: 10px; max-height: 52vh; overflow: auto; }
+  .row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid #8882; }
+  .row:last-child { border-bottom: 0; }
+  .row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .size { font-variant-numeric: tabular-nums; color: #888; font-size: 13px; white-space: nowrap; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; align-items: center; }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 13px; margin: 0; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<h1>방주 보관함 <small>(시험용)</small></h1>
+<p class="note">보관함 검증을 위한 시험 화면입니다. 모양은 나중에 따로 만듭니다.</p>
+
+<div id="login" class="box">
+  <label>방주 비밀번호 <input id="password" type="password" autocomplete="current-password"></label>
+  <button id="loginButton" class="primary">들어가기</button>
+  <span id="loginError" class="note"></span>
+</div>
+
+<div id="main" class="hidden">
+  <div class="box totals" id="totals"></div>
+  <div class="tabs" role="tablist">
+    <button id="tabActive" role="tab" aria-selected="true">쓰는 것</button>
+    <button id="tabArchived" role="tab" aria-selected="false">보관함</button>
+  </div>
+  <div class="bar">
+    <input id="search" type="search" placeholder="이름으로 찾기">
+    <select id="sort">
+      <option value="size">용량 큰 순</option>
+      <option value="name">이름순</option>
+      <option value="recent">최근 순</option>
+    </select>
+  </div>
+  <div class="actions">
+    <button id="selectAll">보이는 것 모두 고르기</button>
+    <button id="selectNone">고르기 풀기</button>
+    <span id="selected" class="note"></span>
+  </div>
+  <div class="list" id="list"></div>
+  <div class="actions">
+    <button id="moveButton" class="primary"></button>
+    <button id="keepOnlyButton">고른 것만 남기고 나머지 보관</button>
+  </div>
+  <div class="box"><pre id="result">아직 옮긴 것이 없습니다.</pre></div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const mb = bytes => (bytes / 1048576).toFixed(bytes < 10485760 ? 2 : 1) + 'MB';
+  let token = null, data = null, tab = 'active', picked = new Set(), busy = false;
+
+  async function call(url, body) {
+    const response = await fetch(url, {
+      method: body ? 'POST' : 'GET',
+      headers: { 'risu-auth': token, ...(body ? { 'content-type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const text = await response.text();
+    let json = null; try { json = JSON.parse(text); } catch {}
+    if (!response.ok) throw new Error((json && json.error) || text.slice(0, 200) || ('오류 ' + response.status));
+    return json;
+  }
+
+  async function login() {
+    $('loginError').textContent = '';
+    try {
+      const response = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: $('password').value }) });
+      const json = await response.json();
+      if (!json.token) throw new Error('비밀번호가 맞지 않습니다.');
+      token = json.token;
+      $('login').classList.add('hidden');
+      $('main').classList.remove('hidden');
+      await refresh();
+    } catch (error) { $('loginError').textContent = error.message; }
+  }
+
+  async function refresh() {
+    data = await call('/api/bangju/archive');
+    picked = new Set();
+    render();
+  }
+
+  function visibleItems() {
+    const items = (tab === 'active' ? data.active : data.archived).slice();
+    const query = $('search').value.trim().toLowerCase();
+    const filtered = query ? items.filter(item => (item.name || '').toLowerCase().includes(query)) : items;
+    const sort = $('sort').value;
+    if (sort === 'size') filtered.sort((a, b) => (b.cardBytes || 0) - (a.cardBytes || 0));
+    else if (sort === 'name') filtered.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
+    else filtered.sort((a, b) => (b.updatedAt || b.archivedAt || 0) - (a.updatedAt || a.archivedAt || 0));
+    return filtered;
+  }
+
+  function render() {
+    const t = data.totals;
+    $('totals').innerHTML = '쓰는 것 <b>' + t.active + '개</b> · 글 데이터 합계 <b>' + mb(t.activeCardBytes) + '</b><br>'
+      + '앱을 열 때 받는 파일 <b>' + mb(t.databaseBytes) + '</b><br>'
+      + '보관함 <b>' + t.archived + '개</b> · ' + mb(t.archivedCardBytes);
+    $('tabActive').setAttribute('aria-selected', String(tab === 'active'));
+    $('tabArchived').setAttribute('aria-selected', String(tab === 'archived'));
+    $('moveButton').textContent = tab === 'active' ? '고른 것 보관하기' : '고른 것 불러오기';
+    $('keepOnlyButton').classList.toggle('hidden', tab !== 'active');
+    const list = $('list');
+    list.textContent = '';
+    const fragment = document.createDocumentFragment();
+    for (const item of visibleItems()) {
+      const row = document.createElement('label');
+      row.className = 'row';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = picked.has(item.id);
+      box.addEventListener('change', () => { box.checked ? picked.add(item.id) : picked.delete(item.id); count(); });
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = item.name || '(이름 없음)';
+      const size = document.createElement('span');
+      size.className = 'size';
+      size.textContent = mb(item.cardBytes || 0) + ' · 채팅 ' + (item.chats || 0);
+      row.append(box, name, size);
+      fragment.append(row);
+    }
+    list.append(fragment);
+    count();
+  }
+
+  function count() {
+    const items = tab === 'active' ? data.active : data.archived;
+    const bytes = items.filter(item => picked.has(item.id)).reduce((total, item) => total + (item.cardBytes || 0), 0);
+    $('selected').textContent = picked.size ? picked.size + '개 고름 · ' + mb(bytes) : '';
+    $('moveButton').disabled = busy || !picked.size;
+    $('keepOnlyButton').disabled = busy || !picked.size;
+  }
+
+  async function move(ids, direction) {
+    if (busy || !ids.length) return;
+    const word = direction === 'archive' ? '보관' : '불러오기';
+    if (!confirm(ids.length + '개를 ' + word + '할까요?')) return;
+    busy = true; count();
+    $('result').textContent = word + ' 중입니다. 창을 닫지 말고 기다려 주세요…';
+    const startedAt = performance.now();
+    try {
+      const before = data.totals;
+      const result = await call('/api/bangju/archive/move', { ids, direction });
+      const seconds = ((performance.now() - startedAt) / 1000).toFixed(1);
+      await refresh();
+      const lines = [
+        word + ' ' + result.moved.length + '개 완료, 실패 ' + result.failed.length + '개',
+        '걸린 시간: ' + seconds + '초 (저장 정리 ' + (result.timings.flushMs || 0) + 'ms, 폴더 옮기기 ' + (result.timings.moveMs || 0) + 'ms, 목록 다시 읽기 ' + (result.timings.adoptMs || 0) + 'ms)',
+        '앱을 열 때 받는 파일: ' + mb(before.databaseBytes) + ' → ' + mb(data.totals.databaseBytes),
+        '쓰는 것: ' + before.active + '개 → ' + data.totals.active + '개',
+        '그림 보호: ' + JSON.stringify(result.assets),
+      ];
+      if (result.failed.length) lines.push('실패한 것: ' + JSON.stringify(result.failed.slice(0, 10)));
+      $('result').textContent = lines.join('\n');
+    } catch (error) {
+      $('result').textContent = '실패: ' + error.message;
+    } finally { busy = false; count(); }
+  }
+
+  $('loginButton').addEventListener('click', login);
+  $('password').addEventListener('keydown', event => { if (event.key === 'Enter') login(); });
+  $('tabActive').addEventListener('click', () => { tab = 'active'; picked = new Set(); render(); });
+  $('tabArchived').addEventListener('click', () => { tab = 'archived'; picked = new Set(); render(); });
+  $('search').addEventListener('input', render);
+  $('sort').addEventListener('change', render);
+  $('selectAll').addEventListener('click', () => { for (const item of visibleItems()) picked.add(item.id); render(); });
+  $('selectNone').addEventListener('click', () => { picked = new Set(); render(); });
+  $('moveButton').addEventListener('click', () => move([...picked], tab === 'active' ? 'archive' : 'restore'));
+  $('keepOnlyButton').addEventListener('click', () => move(data.active.filter(item => !picked.has(item.id)).map(item => item.id), 'archive'));
+})();
+</script>
+</body>
+</html>

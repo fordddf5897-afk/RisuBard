@@ -4654,6 +4654,22 @@ require('./character-package-routes.cjs').registerCharacterPackageRoutes(app, {
     },
 });
 
+// bangju: 보관함 시험판 (B1 검증). 코드는 server/node/bangju/에 있다.
+require('./bangju/archive-routes.cjs').registerBangjuArchiveRoutes(app, {
+    auth: checkAuth,
+    queue: queueStorageOperation,
+    repository: userDataRepository,
+    dataRoot: savePath,
+    isBlocked: () => externalEditSession.isActive() || !canonicalProjectionReady || risuAccountImport.isBlocking(),
+    flush: () => flushPendingDbWithinQueue({ materialize: false }),
+    hasExternalChanges: () => canonicalProjectionSync.hasExternalChanges(),
+    adopt: () => adoptSettledExternalProjection(),
+    revokeSessions: () => sessionLock.revokeAll(),
+    databaseBytes: () => kvSize(DB_BLOB_KEY) || 0,
+    kv: { copyValue: kvCopyValue, has: key => kvGetUpdatedAt(key) !== null, list: kvList, delMany: kvDelMany },
+    logger,
+});
+
 require('./asset-store-routes.cjs').registerAssetStoreRoutes(app, {
     auth: checkAuth,
     activeSession: checkActiveSession,
