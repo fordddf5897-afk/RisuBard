@@ -26,5 +26,6 @@ node t4.cjs http://127.0.0.1:7801 /tmp/bangju-a 7801 /tmp/bangju-a.log   # 옮�
 | `t4.cjs` | 중단 복구: 서버를 강제로 죽이고 파일을 중단 시점 모양으로 둔 뒤 다시 시작 |
 | `t5.cjs` | 규모: 100개만 남기고 보관, 봇 추가 요청 크기, 전부 불러오기, 순서 |
 | `t6.cjs` | 시험용 '봇 추가' 요청이 내는 경고가 보관함과 무관한지 확인 |
+| `t7.cjs` | 목록 다시 읽기가 실패하면 폴더를 전부 되돌리는지. 서버를 `BANGJU_ARCHIVE_TEST_FAIL_RELOAD=1`로 켜고 돌림 |
 | `probe.cjs`, `probe2.cjs` | 시작 읽기 확인, 앱 전체 백업에 들어가는 파일 목록 |
 | `page-test.cjs` | 시험 화면(`/bangju/archive`)을 실제 브라우저로 조작. `puppeteer-core`와 Chrome이 따로 필요 |

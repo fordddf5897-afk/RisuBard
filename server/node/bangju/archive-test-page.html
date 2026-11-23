@@ -31,7 +31,7 @@
 </head>
 <body>
 <h1>방주 보관함 <small>(시험용)</small></h1>
-<p class="note">보관함 검증을 위한 시험 화면입니다. 모양은 나중에 따로 만듭니다.</p>
+<p class="note">보관함 검증을 위한 시험 화면입니다. 모양은 나중에 따로 만듭니다. <span id="version"></span></p>
 
 <div id="login" class="box">
   <label>방주 비밀번호 <input id="password" type="password" autocomplete="current-password"></label>
@@ -56,6 +56,8 @@
   <div class="actions">
     <button id="selectAll">보이는 것 모두 고르기</button>
     <button id="selectNone">고르기 풀기</button>
+    <span>위에서 <input id="topCount" type="number" min="1" value="100" style="width:5em"> 개</span>
+    <button id="selectTop">고르기</button>
     <span id="selected" class="note"></span>
   </div>
   <div class="list" id="list"></div>
@@ -180,7 +182,8 @@
       if (result.failed.length) lines.push('실패한 것: ' + JSON.stringify(result.failed.slice(0, 10)));
       $('result').textContent = lines.join('\n');
     } catch (error) {
-      $('result').textContent = '실패: ' + error.message;
+      $('result').textContent = '실패: ' + error.message + '\n(시험용 사본이라 진짜 데이터에는 영향이 없습니다.)';
+      try { await refresh(); } catch {}
     } finally { busy = false; count(); }
   }
 
@@ -192,6 +195,14 @@
   $('sort').addEventListener('change', render);
   $('selectAll').addEventListener('click', () => { for (const item of visibleItems()) picked.add(item.id); render(); });
   $('selectNone').addEventListener('click', () => { picked = new Set(); render(); });
+  $('selectTop').addEventListener('click', () => {
+    const count = Math.max(1, Number($('topCount').value) || 0);
+    picked = new Set(visibleItems().slice(0, count).map(item => item.id));
+    render();
+  });
+  fetch('/api/bangju/version').then(response => response.json()).then(info => {
+    $('version').textContent = '시험판 ' + info.commit + (info.builtAt ? ' · ' + new Date(info.builtAt).toLocaleString('ko-KR') : '');
+  }).catch(() => {});
   $('moveButton').addEventListener('click', () => move([...picked], tab === 'active' ? 'archive' : 'restore'));
   $('keepOnlyButton').addEventListener('click', () => move(data.active.filter(item => !picked.has(item.id)).map(item => item.id), 'archive'));
 })();

@@ -67,11 +67,33 @@ function registerBangjuArchiveRoutes(app, {
         atomicWriteJson(dataRoot, 'index/sidebar.json', { ...sidebar, characters });
     }
 
+    // 어느 시험판이 돌고 있는지 알려 준다(로그인 불필요). build-info.json은 시험용
+    // 설치본을 만들 때 워크플로가 넣는다.
+    app.get('/api/bangju/version', (req, res) => {
+        let build = { commit: 'dev', builtAt: null };
+        try { build = JSON.parse(fs.readFileSync(path.join(__dirname, 'build-info.json'), 'utf8')); } catch { /* local run */ }
+        res.set('Cache-Control', 'no-store').json({ prototype: 'bangju-archive', ...build });
+    });
+
     // 시험용 화면. 본 화면(SPA)과 따로 열리며, 본 화면이 안 열려도 쓸 수 있다.
     const testPagePath = path.join(__dirname, 'archive-test-page.html');
     app.get('/bangju/archive', (req, res) => {
         res.set('Cache-Control', 'no-store').type('html').send(fs.readFileSync(testPagePath));
     });
+
+    // Moves folders one way and keeps the list order information in step.
+    function moveFolders(ids, direction) {
+        const listed = repository.loadSidebarIndex().characters || [];
+        const result = archive.move({
+            ids, direction,
+            sidebarOf: id => {
+                const position = listed.findIndex(character => character.id === id);
+                return position < 0 ? null : { position, entry: listed[position] };
+            },
+        });
+        if (direction === 'restore' && result.restoredSidebar.length) restoreListOrder(result.restoredSidebar);
+        return result;
+    }
 
     app.get('/api/bangju/archive', async (req, res, next) => {
         if (!await auth(req, res)) return;
@@ -118,20 +140,26 @@ function registerBangjuArchiveRoutes(app, {
                     return res.status(409).json({ code: 'BANGJU_ARCHIVE_BUSY', error: 'Files changed outside the app; review them first' });
                 }
                 startedAt = performance.now();
-                const listed = repository.loadSidebarIndex().characters || [];
-                const result = archive.move({
-                    ids, direction,
-                    sidebarOf: id => {
-                        const position = listed.findIndex(character => character.id === id);
-                        return position < 0 ? null : { position, entry: listed[position] };
-                    },
-                });
-                if (direction === 'restore' && result.restoredSidebar.length) restoreListOrder(result.restoredSidebar);
+                const result = moveFolders(ids, direction);
                 timings.moveMs = elapsed(startedAt);
                 let adopted = null;
                 if (result.moved.length) {
                     startedAt = performance.now();
-                    adopted = await adopt();
+                    try {
+                        // 검증 스크립트가 되돌리기 경로를 시험할 때만 쓰는 스위치.
+                        if (process.env.BANGJU_ARCHIVE_TEST_FAIL_RELOAD === '1') throw new Error('injected reload failure (test)');
+                        adopted = await adopt();
+                    } catch (error) {
+                        // The server could not reload its list: put every folder back where it was.
+                        const back = moveFolders(result.moved, direction === 'archive' ? 'restore' : 'archive');
+                        try { await adopt(); } catch { /* the next page load reloads the list again */ }
+                        logger?.error?.('[Bangju archive] Reload failed; folders were moved back', error);
+                        return res.status(500).json({
+                            code: 'BANGJU_ARCHIVE_ROLLED_BACK',
+                            error: `목록을 다시 읽지 못해 원래대로 되돌렸습니다: ${String(error?.message || error)}`,
+                            rolledBack: back.moved.length, notRolledBack: back.failed,
+                        });
+                    }
                     timings.adoptMs = elapsed(startedAt);
                     // Every open tab still holds the old list.
                     revokeSessions();
