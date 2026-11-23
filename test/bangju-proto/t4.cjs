@@ -40,7 +40,8 @@ const keys = () => Object.keys(JSON.parse(fs.readFileSync(path.join(root, 'kv/ma
     const arch = await tab.post('/api/bangju/archive/move', { ids: [c.id], direction: 'archive' });
     tab = await client(base).login(); await tab.readDb();
     await tab.post('/api/db/orphans/cleanup', {});
-    ok('setup: Bot 0009 archived and its images cleaned out of assets/', arch.json?.moved?.length === 1 && !keys().includes('assets/bot9.png') && keys().some(k => k.endsWith('/bot9.png')));
+    const keptRoot = path.join(archiveRoot, 'assets');
+    ok('setup: Bot 0009 archived and its images cleaned out of assets/', arch.json?.moved?.length === 1 && !keys().includes('assets/bot9.png') && fs.existsSync(path.join(keptRoot, c.id, 'bot9.png')));
     stop();
     fs.renameSync(path.join(archiveRoot, 'characters', c.id), path.join(root, 'characters', c.id));
     console.log('     (killed the server; moved Bot 0009 back by hand, image names not returned)');
@@ -51,5 +52,5 @@ const keys = () => Object.keys(JSON.parse(fs.readFileSync(path.join(root, 'kv/ma
     const image = bot9 ? await tab.asset(bot9.image) : { status: 'missing bot' };
     ok('bot is back in the list after restart', Boolean(bot9), `characters ${db3.characters.length}`);
     ok('its images were returned during startup recovery', image.status === 200, JSON.stringify(image));
-    ok('no spare image names left', keys().filter(k => k.startsWith('bangju/')).length === 0);
+    ok('no kept image names left behind', fs.readdirSync(keptRoot).length === 0);
 })().catch(e => { console.error('TEST CRASHED', e); process.exit(1); });

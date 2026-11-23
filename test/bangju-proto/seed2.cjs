@@ -1,5 +1,6 @@
 'use strict';
-// Like seed.cjs, plus one bot (Bot 0012) whose chat message uses an image that appears nowhere else.
+// Like seed.cjs, plus Bot 0012 with an image used only inside a chat message and an image
+// stored under its content name (the newer asset store).
 const { client, fakeDb } = require('./h.cjs');
 const [base, count = '12'] = process.argv.slice(2);
 (async () => {
@@ -12,6 +13,11 @@ const [base, count = '12'] = process.argv.slice(2);
         await c.writeKey(`assets/extra-bot${i}.png`, Buffer.concat([png, Buffer.from(`extra${i}`)]));
     }
     await c.writeKey('assets/chatonly-12.png', Buffer.concat([png, Buffer.from('chat12')]));
+    // An image named after its own content, the way current app versions store new images.
+    const storedBytes = Buffer.concat([png, Buffer.from('stored12')]);
+    const storedName = `${require('node:crypto').createHash('sha256').update(storedBytes).digest('hex')}.png`;
+    await c.writeKey(`assets/${storedName}`, storedBytes);
+    db.characters[11].additionalAssets.push(['stored', `assets/${storedName}`, 'png']);
     db.characters[11].chats[0].message.push({ role: 'char', data: '그림을 그렸어: ![그림](assets/chatonly-12.png) 어때?', time: 1700000999999 });
     const first = await c.readDb();
     const w = await c.writeDb(db, first.etag);

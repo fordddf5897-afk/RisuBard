@@ -49,9 +49,7 @@ function isDirectory(target) {
 // a bot's metadata refers to; kept so image cleanup can spare archived bots.
 // `collectNestedReferences(value)`: the same for any parsed JSON (chat files).
 // `toStableId(chaId)`: the ID the server lists a bot under.
-// `kv`: the shared asset store ({ copyValue, has, list, delMany }). Archived
-// bots keep a second name for each of their images there, so the app's image
-// cleanup, which only looks at names under assets/, cannot remove the bytes.
+// `kv`: the shared asset store ({ has, set }), used to give images back on restore.
 function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetReferences, collectNestedReferences, toStableId, kv }) {
     const root = path.resolve(dataRoot);
     const archiveRoot = path.join(root, ARCHIVE_DIRECTORY);
@@ -129,35 +127,67 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
         }
     }
 
-    const assetAliasPrefix = id => `bangju/archive/assets/${id}/`;
+    // --- 그림 보호 ---
+    // 앱의 그림 정리는 "지금 쓰는 봇이 가리키지 않는 그림"을 지운다. 보관된 봇의
+    // 그림이 거기에 걸리지 않도록, 보관할 때 그림 파일마다 보관함 쪽에 이름을
+    // 하나 더 만든다(하드링크). 같은 디스크의 같은 내용을 가리키므로 공간과
+    // 시간이 들지 않고, 앱이 원래 이름을 지워도 내용은 남는다.
+    const assetLinks = id => path.join(archiveRoot, 'assets', id);
+    const STORE_FILE = /^([a-f0-9]{64})\.([a-z0-9]{1,16})$/;
+    let manifestEntries = null;
 
-    // Gives each of the bot's images a second name outside assets/. The bytes
-    // are shared with the original, so this takes no extra space or time.
-    function protectAssets(id, assets) {
-        if (!kv) return { protected: 0, missing: 0 };
-        let saved = 0;
-        let missing = 0;
-        for (const name of assets) {
-            if (!kv.has(`assets/${name}`)) { missing += 1; continue; }
-            kv.copyValue(`assets/${name}`, `${assetAliasPrefix(id)}${name}`);
-            saved += 1;
+    // Where the app keeps the bytes of assets/<name>: the asset store keeps a
+    // file named after its content, older assets are objects listed in the manifest.
+    function assetSourcePath(name) {
+        const stored = STORE_FILE.exec(name);
+        if (stored) {
+            const file = path.join(root, 'asset-store', stored[1].slice(0, 2), name);
+            if (fs.existsSync(file)) return file;
         }
-        return { protected: saved, missing };
+        if (!manifestEntries) manifestEntries = readJson(path.join(root, 'kv', 'manifest.json'))?.entries || {};
+        const object = manifestEntries[`assets/${name}`]?.object;
+        if (typeof object === 'string' && /^[a-f0-9]{64}$/.test(object)) {
+            const file = path.join(root, 'kv', 'objects', object);
+            if (fs.existsSync(file)) return file;
+        }
+        return null;
     }
 
-    // Puts back any image the app's cleanup removed while the bot was archived.
-    function returnAssets(id) {
-        if (!kv) return { returned: 0 };
-        const prefix = assetAliasPrefix(id);
-        const aliases = kv.list(prefix);
-        let returned = 0;
-        for (const alias of aliases) {
-            const target = `assets/${alias.slice(prefix.length)}`;
-            if (kv.has(target)) continue;
-            kv.copyValue(alias, target);
-            returned += 1;
+    function protectAssets(id, assets) {
+        const folder = assetLinks(id);
+        let saved = 0;
+        let missing = 0;
+        let copied = 0;
+        for (const name of assets) {
+            const source = assetSourcePath(name);
+            if (!source) { missing += 1; continue; }
+            fs.mkdirSync(folder, { recursive: true });
+            const target = path.join(folder, name);
+            try { fs.linkSync(source, target); }
+            catch (error) {
+                if (error?.code === 'EEXIST') { /* kept from an earlier, interrupted try */ }
+                else if (['EXDEV', 'EPERM', 'ENOTSUP', 'EMLINK'].includes(error?.code)) { fs.copyFileSync(source, target); copied += 1; }
+                else throw error;
+            }
+            saved += 1;
         }
-        if (aliases.length) kv.delMany(aliases);
+        return { protected: saved, missing, copied };
+    }
+
+    // Gives back any image the app's cleanup removed while the bot was archived.
+    function returnAssets(id) {
+        const folder = assetLinks(id);
+        let names;
+        try { names = fs.readdirSync(folder); } catch { return { returned: 0 }; }
+        let returned = 0;
+        for (const name of names) {
+            const key = `assets/${name}`;
+            if (kv && !kv.has(key)) {
+                kv.set(key, fs.readFileSync(path.join(folder, name)));
+                returned += 1;
+            }
+        }
+        fs.rmSync(folder, { recursive: true, force: true });
         return { returned };
     }
 
@@ -186,18 +216,14 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
     function recover() {
         const journal = readJson(journalPath);
         const index = reconcileIndex();
-        // Spare image names whose bot is not archived (a move stopped half way):
-        // give the images back to the app and drop the spare names.
+        // Kept image names whose bot is not archived (a move stopped half way):
+        // give the images back to the app and drop the extra names.
         let returned = 0;
-        if (kv) {
-            const prefix = 'bangju/archive/assets/';
-            const archivedIds = new Set(index.characters.map(entry => entry.id));
-            const strayIds = new Set();
-            for (const key of kv.list(prefix)) {
-                const id = key.slice(prefix.length).split('/')[0];
-                if (id && !archivedIds.has(id)) strayIds.add(id);
-            }
-            for (const id of strayIds) returned += returnAssets(id).returned;
+        const archivedIds = new Set(index.characters.map(entry => entry.id));
+        let kept = [];
+        try { kept = fs.readdirSync(path.join(archiveRoot, 'assets')); } catch { /* nothing kept */ }
+        for (const id of kept) {
+            if (!archivedIds.has(id)) returned += returnAssets(id).returned;
         }
         if (journal) fs.rmSync(journalPath, { force: true });
         return { interrupted: Boolean(journal), archived: index.characters.length, returnedAssets: returned };
@@ -241,7 +267,7 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                 failed.push({ id, error: String(error?.message || error) });
             }
         }
-        if (!plan.length) return { moved: [], failed, restoredSidebar: [], assets: { protected: 0, missing: 0, returned: 0 } };
+        if (!plan.length) return { moved: [], failed, restoredSidebar: [], assets: { protected: 0, missing: 0, copied: 0, returned: 0 } };
 
         fs.mkdirSync(archivedCharacters, { recursive: true });
         fs.mkdirSync(activeCharacters, { recursive: true });
@@ -249,9 +275,10 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
             schemaVersion: 1, direction, startedAt: Date.now(),
             entries: plan.map(entry => ({ id: entry.id, directory: entry.folderName })),
         });
+        manifestEntries = null;
         const moved = [];
         const restoredSidebar = [];
-        const assetTotals = { protected: 0, missing: 0, returned: 0 };
+        const assetTotals = { protected: 0, missing: 0, copied: 0, returned: 0 };
         const characters = index.characters.slice();
         for (const entry of plan) {
             try {
@@ -264,6 +291,7 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                     const kept = protectAssets(entry.id, details.assets);
                     assetTotals.protected += kept.protected;
                     assetTotals.missing += kept.missing;
+                    assetTotals.copied += kept.copied;
                 }
                 fs.renameSync(entry.from, entry.to);
                 if (direction === 'archive') {

@@ -4666,7 +4666,7 @@ require('./bangju/archive-routes.cjs').registerBangjuArchiveRoutes(app, {
     adopt: () => adoptSettledExternalProjection(),
     revokeSessions: () => sessionLock.revokeAll(),
     databaseBytes: () => kvSize(DB_BLOB_KEY) || 0,
-    kv: { copyValue: kvCopyValue, has: key => kvGetUpdatedAt(key) !== null, list: kvList, delMany: kvDelMany },
+    kv: { has: key => kvGetUpdatedAt(key) !== null, set: kvSet },
     logger,
 });
 
