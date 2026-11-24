@@ -10,6 +10,9 @@ name: Bangju - update check
 # 실제로 합치는 일은 'Easy mode - RisuBard sync and image' 작업이 합니다.
 
 on:
+  # REHEARSAL ONLY (this branch is thrown away): run on push, against an older main, with a trial image.
+  push:
+    branches: ['bangju/u2-rehearsal']
   workflow_dispatch:
     inputs:
       trial_image:
@@ -49,7 +52,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.repository.default_branch }}
+          # REHEARSAL: main as it was before RisuBard 0.9.104 was merged, so there is something to merge.
+          ref: ca256b910187c17d58728e93699b4433382528ad
+
+      # REHEARSAL: that older tree has no update-check tools; take them from this branch, outside the working copy.
+      - name: Tools from the rehearsal branch
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/tools"
+          git fetch -q origin "$GITHUB_SHA"
+          git archive "$GITHUB_SHA" deploy/bangju | tar -x -C "$RUNNER_TEMP/tools"
+          ls "$RUNNER_TEMP/tools/deploy/bangju"
 
       - name: setup node
         uses: actions/setup-node@v4
@@ -79,7 +92,7 @@ jobs:
       - name: Earlier result
         shell: bash
         run: |
-          cp deploy/bangju/publish-status.sh "$RUNNER_TEMP/publish-status.sh"
+          cp "$RUNNER_TEMP/tools/deploy/bangju/publish-status.sh" "$RUNNER_TEMP/publish-status.sh"
           curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/bangju-status/update-check.json" -o "$RUNNER_TEMP/previous.json" \
             || echo '{}' > "$RUNNER_TEMP/previous.json"
 
@@ -87,11 +100,11 @@ jobs:
       - name: Look for a new version, try the merge, run the checks
         id: check
         shell: bash
-        run: node deploy/bangju/update-check.cjs --out "$RUNNER_TEMP/update-check.json" --checks --keep-merge --previous "$RUNNER_TEMP/previous.json"
+        run: node "$RUNNER_TEMP/tools/deploy/bangju/update-check.cjs" --out "$RUNNER_TEMP/update-check.json" --checks --keep-merge --previous "$RUNNER_TEMP/previous.json"
 
       - name: Trial image names
         id: trial
-        if: inputs.trial_image && steps.check.outputs.status == 'clean' && steps.check.outputs.checks_ok == 'true'
+        if: (inputs.trial_image || github.event_name == 'push') && steps.check.outputs.status == 'clean' && steps.check.outputs.checks_ok == 'true'
         shell: bash
         run: |
           upstream="${{ steps.check.outputs.upstream_sha }}"
