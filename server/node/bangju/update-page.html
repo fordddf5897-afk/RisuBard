@@ -175,7 +175,7 @@
       // 자동 확인은 매일 돈다. 며칠째 그대로면 멈춘 것이다(GitHub는 오래 조용한 저장소의 예약 작업을 끈다).
       const days = Math.floor((Date.now() - new Date(check.checkedAt).getTime()) / 86400000);
       body += '<p class="note">' + esc(when(check.checkedAt)) + '에 확인함' + (check.runUrl ? ' · <a href="' + esc(check.runUrl) + '" target="_blank" rel="noopener">확인 기록</a>' : '') + '</p>';
-      if (days >= 3) body += '<p class="line warn" id="old">마지막 확인이 ' + days + '일 전입니다. 매일 하는 자동 확인이 멈춘 것 같습니다. 직접 한 번 실행해 주세요: ' + runCheck + '</p>';
+      if (days >= 3) body += '<p class="line warn" id="old">마지막 확인이 ' + days + '일 전입니다. 매일 하는 자동 확인이 멈춘 것 같습니다. 직접 한 번 실행해 주세요: ' + runCheck + ' (그 화면에 <b>Enable workflow</b> 버튼이 보이면 그것부터 누릅니다)</p>';
       if (stale) body += '<p class="line warn" id="stale">확인한 뒤에 본 코드가 바뀌었습니다. 아래 내용은 예전 기준입니다. 다시 확인해 주세요: ' + runCheck + '</p>';
       if (check.status === 'up-to-date') {
         body += '<p class="line" id="upstreamState"><span class="badge low">최신</span> 새 버전이 없습니다. RisuBard <b>' + esc(check.upstream.version) + '</b>까지 들어 있습니다.</p>';
@@ -203,9 +203,12 @@
               ? '복사본용 설치본: <span class="tag" id="trialTag">' + esc(trial) + '</span>. 복사본 프로젝트에서 아래 순서로 올리고, 평소 쓰는 것이 되는지 봅니다.' + nasSteps(trial, '복사본 프로젝트(예: bangju-test)')
               : '복사본용 설치본이 아직 없습니다. ' + runCheck + ' → <b>"복사본에서 먼저 해 볼 설치본도 만들기"를 체크</b>하고 실행합니다. 10~15분 뒤 새로고침하면 여기에 이름표가 나옵니다.')
             + '</li>'
-            + '<li id="mergeStep" class="hidden"><b>본 코드에 합칩니다.</b> <a href="' + esc(mergePage) + '" target="_blank" rel="noopener">GitHub에서 "Easy mode - RisuBard sync and image" 열기</a> → <b>Run workflow</b> → <b>"RisuBard 새 버전 합치기"를 체크</b> → Run workflow.<br>'
+            + (check.mergeByButton === false
+              // GitHub는 작업 파일을 바꾸는 올리기를 기본 권한으로는 받지 않는다: 버튼을 눌러도 실패로 끝난다.
+              ? '<li id="mergeStep" class="hidden"><b>본 코드에 합치는 일은 이번에는 Claude에게 맡깁니다.</b> 이 버전은 GitHub 작업 파일도 바꿔서, GitHub가 "합치기" 버튼으로 올리는 것을 막습니다. 이 화면을 Claude에게 보여 주고 "RisuBard ' + esc(check.upstream.version || '새 버전') + ' 합쳐 줘"라고 하면 됩니다.<br>'
+              : '<li id="mergeStep" class="hidden"><b>본 코드에 합칩니다.</b> <a href="' + esc(mergePage) + '" target="_blank" rel="noopener">GitHub에서 "Easy mode - RisuBard sync and image" 열기</a> → <b>Run workflow</b> → <b>"RisuBard 새 버전 합치기"를 체크</b> → Run workflow.<br>')
             + '<span class="note">저장소 첫 화면의 Sync fork나 Create pull request는 누르지 않습니다.</span></li>'
-            + '<li id="nasStep" class="hidden"><b>NAS를 갱신합니다.</b> 10~15분 뒤 이 화면을 새로고침하면 위 "본 코드의 설치본"에 새 이름표와 순서가 나옵니다.</li>'
+            + '<li id="nasStep" class="hidden"><b>NAS를 갱신합니다.</b> 합친 뒤 10~15분 지나 이 화면을 새로고침하면 위 "본 코드의 설치본"에 새 이름표와 순서가 나옵니다.</li>'
             + '</ol><p class="note" id="snapshotNote">스냅샷을 찍었다고 표시하면 나머지 순서가 나옵니다.</p>';
         }
       }

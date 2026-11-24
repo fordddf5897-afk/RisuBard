@@ -81,6 +81,34 @@ ok('the command writes the result file and exits 0 for a collision too', run.sta
 write(ours, 'server/node/server.cjs', 'edited\n');
 const dirty = spawnSync('node', [SCRIPT, '--out', out, '--upstream-url', upstream], { cwd: ours, encoding: 'utf8' });
 ok('with uncommitted changes it refuses to look', dirty.status === 1 && /커밋하지 않은 변경/.test(dirty.stderr) && fs.readFileSync(path.join(ours, 'server/node/server.cjs'), 'utf8') === 'edited\n', dirty.stderr.trim());
+// workflow files: GitHub refuses them from the merge workflow's default token, so the result says the button will not do
+{
+    const theirs = path.join(work, 'upstream-w');
+    const mine = path.join(work, 'ours-w');
+    fs.mkdirSync(theirs);
+    git(theirs, 'init', '-q', '-b', 'main');
+    commit(theirs, 'release: 2.0.0', { 'package.json': '{ "version": "2.0.0" }\n', '.github/workflows/build.yml': 'name: build\non: push\n', '.github/workflows/lint.yml': 'name: lint\n', 'src/a.ts': 'a\n' });
+    git(work, 'clone', '-q', theirs, mine);
+    // we already carry the same fix to lint.yml that upstream is about to make
+    commit(mine, 'our feature', { 'src/ours.ts': 'ours\n', '.github/workflows/lint.yml': 'name: lint\nenv: { X: 1 }\n' });
+    commit(theirs, 'release: 2.0.1', { 'package.json': '{ "version": "2.0.1" }\n', '.github/workflows/lint.yml': 'name: lint\nenv: { X: 1 }\n', 'src/a.ts': 'a2\n' });
+    const same = inspect(mine, { upstreamUrl: theirs });
+    abortMerge(mine);
+    ok('a workflow change we already carry is no obstacle', same.status === 'clean' && same.files.workflows.length === 0 && same.mergeByButton === true && same.files.overlap.includes('.github/workflows/lint.yml'), JSON.stringify(same.files));
+    commit(theirs, 'release: 2.0.2', { 'package.json': '{ "version": "2.0.2" }\n', '.github/workflows/build.yml': 'name: build\non: [push, pull_request]\n' });
+    const blocked = inspect(mine, { upstreamUrl: theirs });
+    abortMerge(mine);
+    ok('a workflow file the merge would change means the merge button cannot publish it, and the reasons say so', blocked.status === 'clean' && blocked.files.workflows.join() === '.github/workflows/build.yml'
+        && blocked.mergeByButton === false && blocked.reasons.some(reason => reason.includes("'합치기' 버튼으로 올리는 것을 막습니다") && reason.includes('build.yml')) && blocked.risk !== 'high', JSON.stringify(blocked.reasons));
+    const allowed = inspect(mine, { upstreamUrl: theirs, syncToken: true });
+    abortMerge(mine);
+    ok('with a token that may change workflows the button works, and the change is only mentioned', allowed.mergeByButton === true && allowed.files.workflows.length === 1
+        && allowed.reasons.some(reason => reason.includes('GitHub 작업 파일 1개도 바뀝니다')) && !allowed.reasons.some(reason => reason.includes('막습니다')));
+    const viaCommand = spawnSync('node', [SCRIPT, '--out', path.join(work, 'w.json'), '--upstream-url', theirs], { cwd: mine, encoding: 'utf8', env: { ...process.env, HAS_SYNC_TOKEN: 'false' } });
+    const published = JSON.parse(fs.readFileSync(path.join(work, 'w.json'), 'utf8'));
+    ok('the result file carries it', viaCommand.status === 0 && published.mergeByButton === false && published.files.workflows.join() === '.github/workflows/build.yml' && git(mine, 'status', '--porcelain') === '');
+}
+
 // the status branch: a file is published without removing the other workflow's file, and the branch keeps one commit
 const PUBLISH = path.join(__dirname, '../../deploy/bangju/publish-status.sh');
 const remote = path.join(work, 'status.git');

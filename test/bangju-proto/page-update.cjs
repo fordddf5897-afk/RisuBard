@@ -103,6 +103,14 @@ const none = { status: 404, body: {} };
         && await page.$eval('#upstream pre.copy', element => element.textContent) === 'image: ghcr.io/someone/some-fork:bangju-test-up-ccccccc-bbbbbbb' && (await text('upstream')).includes('복사본 프로젝트'));
     ok('the run list is only a hint: without it the newest image is still known', await text('latestTag') === 'sha-bbbbbbb' && !(await has('#building')) && !(await has('#buildFailed')));
 
+    // 2b. the merge button cannot publish this version (it changes workflow files)
+    await open({ image: found(mainImage(MAIN)), status: found(check({ mergeByButton: false, files: { total: 12, storage: [], dependencies: [], overlap: [], workflows: ['.github/workflows/build.yml'] },
+        reasons: ["GitHub 작업 파일 1개가 바뀌어, GitHub가 '합치기' 버튼으로 올리는 것을 막습니다. 합치는 일은 Claude에게 맡기면 됩니다: .github/workflows/build.yml"] })) });
+    await page.click('#snapshotDone');
+    const byClaude = await text('mergeStep');
+    ok('when the button cannot publish the merge, the step says to ask Claude and offers no workflow link', byClaude.includes('Claude에게 맡깁니다') && byClaude.includes('RisuBard 0.9.105 합쳐 줘') && byClaude.includes('Sync fork')
+        && !(await has('#mergeStep a')) && (await text('nasStep')).includes('합친 뒤'), byClaude.slice(0, 160));
+
     // 3. it does not merge
     await open({ image: found(mainImage(MAIN)), status: found(check({ status: 'conflict', risk: 'high', conflicts: ['server/node/server.cjs', 'src/App.svelte'], reasons: ['합칠 때 파일 2개가 부딪칩니다: server/node/server.cjs, src/App.svelte'], checks: { easy: 'skipped', bangju: 'skipped' } })) });
     const high = await text('upstream');
@@ -125,7 +133,7 @@ const none = { status: 404, body: {} };
 
     // 7. the daily check stopped
     await open({ image: found(mainImage(MAIN)), status: found(check({ checkedAt: new Date(Date.now() - 5 * 86400000).toISOString() })) });
-    ok('a check that is days old says the daily check seems to have stopped', (await text('old')).includes('5일 전') && (await text('old')).includes('멈춘 것 같습니다'));
+    ok('a check that is days old says the daily check seems to have stopped', (await text('old')).includes('5일 전') && (await text('old')).includes('멈춘 것 같습니다') && (await text('old')).includes('Enable workflow'));
 
     // 8. a failed build, GitHub refusing for a while, and a record that is not what it should be
     await open({ image: found(mainImage(INSTALLED_SHA)), status: { status: 403, body: {} }, runs: found({ workflow_runs: [run(MAIN, 'completed', 'failure'), run(INSTALLED_SHA)] }) });

@@ -87,6 +87,9 @@ jobs:
       - name: Look for a new version, try the merge, run the checks
         id: check
         shell: bash
+        env:
+          # Whether the merge workflow could push a merge that changes workflow files.
+          HAS_SYNC_TOKEN: ${{ secrets.EASY_SYNC_TOKEN != '' }}
         run: node deploy/bangju/update-check.cjs --out "$RUNNER_TEMP/update-check.json" --checks --keep-merge --previous "$RUNNER_TEMP/previous.json"
 
       - name: Trial image names

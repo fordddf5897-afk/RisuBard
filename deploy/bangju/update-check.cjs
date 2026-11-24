@@ -30,7 +30,8 @@ function versionAt(cwd, ref) {
 
 // Compares with upstream and tries the merge. Leaves the merged (uncommitted) tree in place
 // when it merged cleanly; the caller aborts it or keeps it.
-function inspect(cwd, { upstreamUrl = DEFAULT_UPSTREAM, upstreamBranch = 'main', now = new Date() } = {}) {
+// syncToken: the merge workflow has a token that may push workflow-file changes (EASY_SYNC_TOKEN).
+function inspect(cwd, { upstreamUrl = DEFAULT_UPSTREAM, upstreamBranch = 'main', now = new Date(), syncToken = false } = {}) {
     if (git(cwd, ['status', '--porcelain', '--untracked-files=no'])) throw new Error('커밋하지 않은 변경이 있어 살펴보지 않습니다.');
     const baseSha = git(cwd, ['rev-parse', 'HEAD']);
     git(cwd, ['fetch', '--no-tags', '--quiet', upstreamUrl, upstreamBranch]);
@@ -43,9 +44,10 @@ function inspect(cwd, { upstreamUrl = DEFAULT_UPSTREAM, upstreamBranch = 'main',
         upstream: { url: upstreamUrl.replace(/\.git$/, ''), branch: upstreamBranch, sha: upstreamSha, version: versionAt(cwd, upstreamSha) },
         status: 'up-to-date',
         commits: { total: 0, list: [] },
-        files: { total: 0, storage: [], dependencies: [], overlap: [] },
+        files: { total: 0, storage: [], dependencies: [], overlap: [], workflows: [] },
         conflicts: [],
         checks: { easy: 'skipped', bangju: 'skipped' },
+        mergeByButton: true,
         merged: false,
     };
     if (tryGit(cwd, ['merge-base', '--is-ancestor', upstreamSha, 'HEAD']).ok) return finish(result);
@@ -62,6 +64,7 @@ function inspect(cwd, { upstreamUrl = DEFAULT_UPSTREAM, upstreamBranch = 'main',
         storage: storageFiles(theirs),
         dependencies: dependencyFiles(theirs),
         overlap: theirs.filter(file => ours.has(file)),
+        workflows: [],
         all: theirs,
     };
 
@@ -69,6 +72,10 @@ function inspect(cwd, { upstreamUrl = DEFAULT_UPSTREAM, upstreamBranch = 'main',
     if (merge.ok) {
         result.status = 'clean';
         result.merged = true;
+        // Workflow files that would differ from ours after the merge. GitHub refuses a push that changes
+        // them unless the token may, so the merge workflow cannot publish such a merge with its default token.
+        result.files.workflows = lines(tryGit(cwd, ['diff', '--cached', '--name-only', 'HEAD', '--', '.github/workflows']).out);
+        result.mergeByButton = !result.files.workflows.length || Boolean(syncToken);
     } else {
         result.conflicts = lines(tryGit(cwd, ['diff', '--name-only', '--diff-filter=U']).out);
         abortMerge(cwd);
@@ -84,7 +91,8 @@ function abortMerge(cwd) {
 
 // Risk and the lists the screen shows; the full file list is only for the rules.
 function finish(result) {
-    const { risk, reasons } = assessRisk({ status: result.status, conflicts: result.conflicts, checks: result.checks, files: result.files.all || [], overlap: result.files.overlap });
+    const { risk, reasons } = assessRisk({ status: result.status, conflicts: result.conflicts, checks: result.checks, files: result.files.all || [], overlap: result.files.overlap,
+        workflows: result.files.workflows, mergeByButton: result.mergeByButton });
     const { all, ...files } = result.files;
     return { ...result, files, risk, reasons, ...(all ? { allFiles: all } : {}) };
 }
@@ -128,6 +136,7 @@ function main(argv) {
         result = inspect(cwd, {
             upstreamUrl: args.get('--upstream-url') || process.env.UPSTREAM_URL || DEFAULT_UPSTREAM,
             upstreamBranch: args.get('--upstream-branch') || process.env.UPSTREAM_BRANCH || 'main',
+            syncToken: process.env.HAS_SYNC_TOKEN === 'true',
         });
     } catch (error) {
         abortMerge(cwd);
