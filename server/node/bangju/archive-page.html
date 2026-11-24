@@ -88,6 +88,7 @@
       <option value="name">이름순</option>
       <option value="folder">폴더별로 묶기</option>
     </select>
+    <button id="sortFlip" type="button" title="정렬 순서 뒤집기" aria-label="정렬 순서 뒤집기"></button>
     <label class="toggle"><input id="showCovers" type="checkbox"> 표지 보기</label>
   </div>
   <div class="actions">
@@ -234,12 +235,31 @@
       ? items.filter(item => (item.name || '').toLowerCase().includes(query) || (item.tags || []).some(tag => tag.toLowerCase().includes(query)))
       : items;
     const sort = $('sort').value;
-    if (sort === 'size') filtered.sort((a, b) => (b.cardBytes || 0) - (a.cardBytes || 0));
-    else if (sort === 'name') filtered.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
-    else if (sort === 'folder') filtered.sort((a, b) => rankOf(a) - rankOf(b) || (a.name || '').localeCompare(b.name || '', 'ko'));
-    else if (sort === 'idle') filtered.sort((a, b) => (a.lastChatAt || 0) - (b.lastChatAt || 0));
-    else filtered.sort((a, b) => (b.lastChatAt || 0) - (a.lastChatAt || 0));
+    const way = flipped[sort] ? -1 : 1;
+    const byName = (a, b) => (a.name || '').localeCompare(b.name || '', 'ko');
+    if (sort === 'size') filtered.sort((a, b) => way * ((b.cardBytes || 0) - (a.cardBytes || 0)));
+    else if (sort === 'name') filtered.sort((a, b) => way * byName(a, b));
+    // 폴더별로 묶기를 뒤집으면 폴더의 순서만 거꾸로 되고, 폴더 안은 그대로 이름순이다.
+    else if (sort === 'folder') filtered.sort((a, b) => way * (rankOf(a) - rankOf(b)) || byName(a, b));
+    else if (sort === 'idle') filtered.sort((a, b) => way * ((a.lastChatAt || 0) - (b.lastChatAt || 0)));
+    else filtered.sort((a, b) => way * ((b.lastChatAt || 0) - (a.lastChatAt || 0)));
     return filtered;
+  }
+
+  // 정렬마다 위아래를 뒤집을 수 있다(B7). 단추에는 지금 어느 쪽부터 나오는지 적는다.
+  // 뒤집은 것은 정렬마다 따로 기억한다(이 화면을 열어 둔 동안).
+  const SORT_ENDS = {
+    size: ['큰 것부터', '작은 것부터'],
+    idle: ['오래 안 쓴 것부터', '최근에 쓴 것부터'],
+    recent: ['최근에 쓴 것부터', '오래 안 쓴 것부터'],
+    name: ['가나다순', '가나다 거꾸로'],
+    folder: ['폴더 순서대로', '폴더 순서 거꾸로'],
+  };
+  const flipped = {};
+  function showSortEnd() {
+    const sort = $('sort').value;
+    $('sortFlip').textContent = '⇅ ' + SORT_ENDS[sort][flipped[sort] ? 1 : 0];
+    $('sortFlip').setAttribute('aria-pressed', flipped[sort] ? 'true' : 'false');
   }
 
   const day = time => (time ? new Date(time).toLocaleDateString('ko-KR', { year: '2-digit', month: 'numeric', day: 'numeric' }) : '');
@@ -604,7 +624,9 @@
   $('tabActive').addEventListener('click', () => { tab = 'active'; picked = new Set(); render(); });
   $('tabArchived').addEventListener('click', () => { tab = 'archived'; picked = new Set(); render(); });
   $('search').addEventListener('input', render);
-  $('sort').addEventListener('change', render);
+  $('sort').addEventListener('change', () => { showSortEnd(); render(); });
+  $('sortFlip').addEventListener('click', () => { const sort = $('sort').value; flipped[sort] = !flipped[sort]; showSortEnd(); render(); });
+  showSortEnd();
   $('folder').addEventListener('change', render);
   try { $('showCovers').checked = localStorage.getItem('bangju.covers') === '1'; } catch {}
   $('showCovers').addEventListener('change', () => {
