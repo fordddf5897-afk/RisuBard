@@ -25,7 +25,8 @@ const kvKeys = () => Object.keys(JSON.parse(fs.readFileSync(path.join(root, 'kv/
     const assetKeysAfter = kvKeys().filter(k => k.startsWith('assets/'));
     const lost = assetKeysBefore.filter(k => !assetKeysAfter.includes(k));
     note('image cleanup after archiving', `status ${cleanup.status}, removed ${JSON.stringify(cleanup.json?.assets)}; keys lost: ${lost.join(', ') || 'none'}`);
-    ok('HAZARD CONFIRMED: cleanup deletes the archived bot\'s images', lost.includes('assets/bot3.png') && lost.includes('assets/extra-bot3.png'), 'this is the case that needs protection');
+    // Before the cleanup counted archived bots, it deleted these two. That hazard is closed now.
+    ok('the app\'s cleanup no longer deletes the archived bot\'s images', !lost.includes('assets/bot3.png') && !lost.includes('assets/extra-bot3.png'), `keys lost: ${lost.join(', ') || 'none'}`);
 
     // --- A V3 package bot: folder holds its own copies of the images.
     const status0 = await tab.get(`/api/character-packages/status?characterId=${bot6.id}`);
@@ -39,7 +40,7 @@ const kvKeys = () => Object.keys(JSON.parse(fs.readFileSync(path.join(root, 'kv/
     tab = await client(base).login(); await tab.readDb();
     const arch6 = await tab.post('/api/bangju/archive/move', { ids: [bot6.id], direction: 'archive' });
     ok('archive V3 bot', arch6.status === 200 && arch6.json.moved.length === 1 && arch6.json.adopted, JSON.stringify(arch6.json).slice(0, 220));
-    ok('V3 folder moved with its asset copies', fs.existsSync(path.join(root, 'bangju/archive/characters', entry.directory, 'metadata.json')) && !fs.existsSync(path.join(root, 'characters', entry.directory)));
+    ok('V3 folder moved with its asset copies', fs.existsSync(path.join(root, 'risubard/bangju-archive/characters', entry.directory, 'metadata.json')) && !fs.existsSync(path.join(root, 'characters', entry.directory)));
     tab = await client(base).login();
     const db1 = await tab.readDb();
     ok('database without the V3 bot', db1.status === 200 && db1.db.characters.length === 10 && !db1.db.characters.some(c => c.name === 'Bot 0006'), `characters ${db1.db?.characters?.length ?? db1.body}`);

@@ -4,7 +4,7 @@ const puppeteer = require('puppeteer-core');
 const [base, shot] = process.argv.slice(2);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
-    const browser = await puppeteer.launch({ executablePath: '/usr/bin/google-chrome', headless: 'new', args: ['--no-sandbox', '--disable-gpu'] });
+    const browser = await puppeteer.launch({ executablePath: process.env.CHROME || '/usr/bin/google-chrome', headless: 'new', args: ['--no-sandbox', '--disable-gpu'] });
     const page = await browser.newPage();
     await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 2 });
     page.on('dialog', d => d.accept());
@@ -63,6 +63,17 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await page.waitForFunction(() => /불러오기 1개 완료/.test(document.getElementById('result').innerText), { timeout: 30000 });
     page.off('request', onRequest);
     await page.setRequestInterception(false);
+    // Covers are off until asked for; then only rows on screen fetch theirs.
+    await page.click('#tabActive');
+    const coverRequests = [];
+    page.on('request', request => { if (request.url().includes('/api/bangju/archive/cover/')) coverRequests.push(request.url()); });
+    console.log('covers before the switch:', await page.$$eval('#list .cover', covers => covers.filter(c => getComputedStyle(c).display !== 'none').length), 'shown,', coverRequests.length, 'requested');
+    await page.click('#showCovers');
+    await sleep(1500);
+    // The seeded images are not real pictures, so nothing can be drawn; what matters is which rows asked.
+    console.log('covers after the switch:', await page.$$eval('#list .cover', covers => covers.filter(c => getComputedStyle(c).display !== 'none').length), 'shown of',
+        await page.$$eval('#list .row', rows => rows.length), 'rows,', coverRequests.length, 'requested (only bots that have one)');
+    await page.click('#showCovers');
     // Reopening the page shows the last result again (kept on the server).
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.type('#password', 'test1234');
@@ -71,5 +82,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     console.log('after reopening:', (await text('#result')).split('\n').slice(0, 2).join(' / '));
     console.log('version line:', await text('#version'));
     console.log('page errors:', errors.length ? errors : 'none');
+    console.log(errors.length ? 'FAIL  the page ran without script errors' : 'PASS  the page ran every step without script errors');
+    if (errors.length) process.exitCode = 1;
     await browser.close();
 })().catch(e => { console.error('PAGE TEST FAILED', e.message); process.exit(1); });

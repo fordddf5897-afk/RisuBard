@@ -5,37 +5,60 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>방주 보관함</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; padding: 12px; max-width: 760px; margin-inline: auto; }
-  h1 { font-size: 18px; margin: 4px 0 2px; }
-  .note { color: #888; font-size: 13px; margin: 0 0 10px; }
-  .box { border: 1px solid #8884; border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
+  :root { color-scheme: light dark; --line: #8883; --soft: #8881; --accent: #3d6fe0; --muted: #808590; --danger: #c0392b; }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.5 system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; margin: 0 auto; padding: 12px 12px 96px; max-width: 780px; }
+  header { display: flex; align-items: baseline; gap: 10px; margin: 2px 0 10px; }
+  h1 { font-size: 19px; margin: 0; flex: 1; }
+  header a { color: var(--accent); text-decoration: none; font-size: 14px; }
+  .note { color: var(--muted); font-size: 13px; margin: 0; }
+  .box { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 10px 0; }
   .totals b { font-size: 17px; }
+  .meter { height: 6px; border-radius: 3px; background: var(--line); margin: 7px 0 3px; overflow: hidden; }
+  .meter i { display: block; height: 100%; background: var(--accent); }
+  .meter i.high { background: var(--danger); }
+  .warn { color: var(--danger); font-weight: 600; font-size: 13px; }
   .tabs { display: flex; gap: 6px; margin-top: 12px; }
-  .tabs button { flex: 1; padding: 9px; border-radius: 8px; border: 1px solid #8886; background: transparent; color: inherit; font: inherit; }
-  .tabs button[aria-selected=true] { background: #4a7dff; border-color: #4a7dff; color: #fff; }
-  .bar { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 6px; }
+  .tabs button { flex: 1; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: inherit; font: inherit; }
+  .tabs button[aria-selected=true] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .bar { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 6px; align-items: center; }
   .bar input[type=search] { flex: 1 1 160px; min-width: 0; }
-  input, select, button { font: inherit; padding: 7px 9px; border-radius: 8px; border: 1px solid #8886; background: transparent; color: inherit; }
-  button.primary { background: #4a7dff; border-color: #4a7dff; color: #fff; }
-  button:disabled { opacity: .45; }
-  .list { border: 1px solid #8884; border-radius: 10px; max-height: 52vh; overflow: auto; }
-  .row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid #8882; }
+  input, select, button { font: inherit; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line); background: transparent; color: inherit; }
+  input[type=checkbox] { width: 18px; height: 18px; padding: 0; flex: none; accent-color: var(--accent); }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .45; cursor: default; }
+  label.toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
+  .list { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--soft); cursor: pointer; }
   .row:last-child { border-bottom: 0; }
-  .row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .row .size { font-variant-numeric: tabular-nums; color: #888; font-size: 13px; white-space: nowrap; }
+  .row.picked { background: var(--soft); }
+  .cover { width: 40px; height: 40px; border-radius: 9px; flex: none; background: var(--soft) center/cover no-repeat; display: grid; place-items: center; color: var(--muted); font-weight: 600; overflow: hidden; }
+  .list.plain .cover { display: none; }
+  .main { flex: 1; min-width: 0; }
+  .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tags { display: flex; gap: 4px; overflow: hidden; margin-top: 2px; }
+  .tags span { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 0 5px; white-space: nowrap; }
+  .side { text-align: right; font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; flex: none; }
+  .side b { display: block; font-size: 13px; color: inherit; font-weight: 600; }
+  .more { padding: 10px; text-align: center; color: var(--muted); font-size: 13px; }
+  .empty { padding: 28px 12px; text-align: center; color: var(--muted); }
   .actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; align-items: center; }
-  pre { white-space: pre-wrap; word-break: break-word; font-size: 13px; margin: 0; }
-  .hidden { display: none; }
-  .warn { color: #c0392b; font-weight: 600; }
-  .meter { height: 6px; border-radius: 3px; background: #8883; margin: 6px 0 2px; overflow: hidden; }
-  .meter i { display: block; height: 100%; background: #4a7dff; }
-  .meter i.high { background: #c0392b; }
+  .dock { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); background: Canvas; border-top: 1px solid var(--line); }
+  .dock .inner { max-width: 756px; margin: 0 auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .dock .picked-note { flex: 1 1 100%; font-size: 13px; color: var(--muted); }
+  .dock button { flex: 1 1 0; white-space: nowrap; }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 13px; margin: 0; font-family: inherit; }
+  details summary { cursor: pointer; }
+  .hidden { display: none !important; }
 </style>
 </head>
 <body>
-<h1>방주 보관함</h1>
-<p class="note">임시 모양의 화면입니다. 표지와 태그가 보이는 화면은 따로 만듭니다. <span id="version"></span></p>
+<header>
+  <h1>방주 보관함</h1>
+  <a href="/">앱 열기</a>
+</header>
+<p class="note">안 쓰는 봇을 보관함으로 옮기면 앱이 가벼워집니다. 채팅과 그림은 같이 보관되고, 불러오면 그대로 돌아옵니다. <span id="version"></span></p>
 
 <div id="login" class="box">
   <label>리스버드 비밀번호 (평소 앱을 열 때 넣는 것) <input id="password" type="password" autocomplete="current-password"></label>
@@ -45,41 +68,45 @@
 
 <div id="main" class="hidden">
   <div class="box totals" id="totals"></div>
+  <div class="box hidden" id="interrupted">
+    <pre id="interruptedText"></pre>
+    <div class="actions"><button id="resumeButton" class="primary">이어서 하기</button><button id="dismissButton">그만두기</button></div>
+  </div>
   <div class="tabs" role="tablist">
     <button id="tabActive" role="tab" aria-selected="true">쓰는 것</button>
     <button id="tabArchived" role="tab" aria-selected="false">보관함</button>
   </div>
   <div class="bar">
-    <input id="search" type="search" placeholder="이름으로 찾기">
-    <select id="sort">
+    <input id="search" type="search" placeholder="이름이나 태그로 찾기">
+    <select id="sort" aria-label="정렬">
       <option value="size">용량 큰 순</option>
+      <option value="idle">오래 안 쓴 순</option>
+      <option value="recent">최근 대화순</option>
       <option value="name">이름순</option>
-      <option value="recent">최근 순</option>
     </select>
+    <label class="toggle"><input id="showCovers" type="checkbox"> 표지 보기</label>
   </div>
   <div class="actions">
-    <button id="selectAll">보이는 것 모두 고르기</button>
+    <button id="selectAll">찾은 것 모두 고르기</button>
     <button id="selectNone">고르기 풀기</button>
-    <span>위에서 <input id="topCount" type="number" min="1" value="100" style="width:5em"> 개</span>
+    <span class="note">위에서 <input id="topCount" type="number" min="1" value="100" style="width:5em"> 개</span>
     <button id="selectTop">고르기</button>
-    <span id="selected" class="note"></span>
   </div>
-  <div class="list" id="list"></div>
-  <div class="actions">
-    <button id="moveButton" class="primary"></button>
-    <button id="keepOnlyButton">고른 것만 남기고 나머지 보관</button>
-  </div>
-  <div class="box hidden" id="interrupted">
-    <pre id="interruptedText"></pre>
-    <div class="actions"><button id="resumeButton" class="primary">이어서 하기</button><button id="dismissButton">그만두기</button></div>
-  </div>
+  <div class="list plain" id="list"></div>
   <div class="box"><pre id="result">아직 옮긴 것이 없습니다.</pre></div>
   <details class="box">
-    <summary>보관된 봇의 그림 다시 확인</summary>
-    <p class="note">보관함에 있는 봇의 그림 가운데 아직 보호 이름표가 없는 것을 다시 찾아봅니다. 이름표를 더할 뿐이고 아무것도 옮기거나 지우지 않습니다. 봇이 많으면 1분쯤 걸립니다.</p>
+    <summary>보관된 봇 다시 확인</summary>
+    <p class="note">보관함에 있는 봇의 그림 가운데 보호 이름표가 없는 것을 다시 찾아보고, 목록에 태그와 표지 정보가 빠진 봇을 채웁니다. 이름표와 목록 정보를 더할 뿐이고 아무것도 옮기거나 지우지 않습니다. 봇이 많으면 1~2분 걸립니다.</p>
     <button id="recheckButton">다시 확인하기</button>
     <pre id="recheckResult"></pre>
   </details>
+  <div class="dock">
+    <div class="inner">
+      <span id="selected" class="picked-note"></span>
+      <button id="keepOnlyButton">고른 것만 남기기</button>
+      <button id="moveButton" class="primary"></button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -141,12 +168,120 @@
   function visibleItems() {
     const items = (tab === 'active' ? data.active : data.archived).slice();
     const query = $('search').value.trim().toLowerCase();
-    const filtered = query ? items.filter(item => (item.name || '').toLowerCase().includes(query)) : items;
+    const filtered = query
+      ? items.filter(item => (item.name || '').toLowerCase().includes(query) || (item.tags || []).some(tag => tag.toLowerCase().includes(query)))
+      : items;
     const sort = $('sort').value;
     if (sort === 'size') filtered.sort((a, b) => (b.cardBytes || 0) - (a.cardBytes || 0));
     else if (sort === 'name') filtered.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
-    else filtered.sort((a, b) => (b.updatedAt || b.archivedAt || 0) - (a.updatedAt || a.archivedAt || 0));
+    else if (sort === 'idle') filtered.sort((a, b) => (a.lastChatAt || 0) - (b.lastChatAt || 0));
+    else filtered.sort((a, b) => (b.lastChatAt || 0) - (a.lastChatAt || 0));
     return filtered;
+  }
+
+  const day = time => (time ? new Date(time).toLocaleDateString('ko-KR', { year: '2-digit', month: 'numeric', day: 'numeric' }) : '');
+
+  // --- 표지: 원본 크기 그림이라 '표지 보기'를 켰을 때, 화면에 보이는 줄만 받아 온다 ---
+  const covers = new Map();   // 봇 ID → 그림 주소(없으면 '')
+  const waiting = [];
+  let loading = 0;
+  function wantCover(id, element) {
+    if (covers.has(id)) { paintCover(element, covers.get(id)); return; }
+    waiting.push({ id, element });
+    pumpCovers();
+  }
+  // 그림이 실제로 그려질 때만 글자 자리를 표지로 바꾼다(깨진 그림이면 글자를 그대로 둔다).
+  function paintCover(element, url) {
+    if (!url) return;
+    const probe = new Image();
+    probe.onload = () => { element.style.backgroundImage = 'url("' + url + '")'; element.textContent = ''; };
+    probe.src = url;
+  }
+  async function pumpCovers() {
+    while (loading < 3 && waiting.length) {
+      const { id, element } = waiting.shift();
+      if (covers.has(id)) { paintCover(element, covers.get(id)); continue; }
+      loading += 1;
+      (async () => {
+        let url = '';
+        try {
+          const response = await fetch('/api/bangju/archive/cover/' + encodeURIComponent(id), { headers: { 'risu-auth': token } });
+          if (response.ok) url = URL.createObjectURL(await response.blob());
+        } catch {}
+        covers.set(id, url);
+        paintCover(element, url);
+      })().finally(() => { loading -= 1; pumpCovers(); });
+    }
+  }
+  const coverWatcher = 'IntersectionObserver' in window ? new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      coverWatcher.unobserve(entry.target);
+      wantCover(entry.target.dataset.id, entry.target);
+    }
+  }, { rootMargin: '200px' }) : null;
+
+  // --- 목록: 한 화면 분량(100줄)씩 그린다. 수천 개여도 처음 화면은 가볍다 ---
+  const PAGE = 100;
+  let shown = [];
+  let drawn = 0;
+  const moreWatcher = 'IntersectionObserver' in window ? new IntersectionObserver(entries => {
+    if (entries.some(entry => entry.isIntersecting)) drawMore();
+  }, { rootMargin: '400px' }) : null;
+
+  function rowFor(item) {
+    const row = document.createElement('label');
+    row.className = 'row' + (picked.has(item.id) ? ' picked' : '');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = picked.has(item.id);
+    box.addEventListener('change', () => {
+      box.checked ? picked.add(item.id) : picked.delete(item.id);
+      row.classList.toggle('picked', box.checked);
+      count();
+    });
+    const cover = document.createElement('span');
+    cover.className = 'cover';
+    cover.dataset.id = item.id;
+    cover.textContent = (item.name || '?').trim().slice(0, 1);
+    if ($('showCovers').checked && item.hasCover && coverWatcher) coverWatcher.observe(cover);
+    const main = document.createElement('span');
+    main.className = 'main';
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = item.name || '(이름 없음)';
+    main.append(name);
+    if ((item.tags || []).length) {
+      const tags = document.createElement('div');
+      tags.className = 'tags';
+      for (const tag of item.tags.slice(0, 4)) { const chip = document.createElement('span'); chip.textContent = tag; tags.append(chip); }
+      main.append(tags);
+    }
+    const side = document.createElement('span');
+    side.className = 'side';
+    const size = document.createElement('b');
+    size.textContent = mb(item.cardBytes || 0);
+    side.append(size, '채팅 ' + (item.chats || 0) + (item.lastChatAt ? ' · ' + day(item.lastChatAt) : ''));
+    row.append(box, cover, main, side);
+    return row;
+  }
+
+  function drawMore() {
+    const list = $('list');
+    const old = list.querySelector('.more');
+    if (old) { if (moreWatcher) moreWatcher.unobserve(old); old.remove(); }
+    const fragment = document.createDocumentFragment();
+    for (const item of shown.slice(drawn, drawn + PAGE)) fragment.append(rowFor(item));
+    drawn = Math.min(shown.length, drawn + PAGE);
+    list.append(fragment);
+    if (drawn < shown.length) {
+      const more = document.createElement('div');
+      more.className = 'more';
+      more.textContent = shown.length + '개 중 ' + drawn + '개 표시 · 더 보기';
+      more.addEventListener('click', drawMore);
+      list.append(more);
+      if (moreWatcher) moreWatcher.observe(more);
+    }
   }
 
   function render() {
@@ -159,38 +294,30 @@
         + '<span class="' + (share >= 80 ? 'warn' : 'note') + '">봇 추가·삭제 한도 ' + mb(limit) + '의 ' + share + '%'
         + (share >= 100 ? ' — 한도를 넘었습니다. 지금은 봇을 넣거나 지울 수 없습니다.' : share >= 80 ? ' — 한도에 가깝습니다.' : '') + '</span><br>' : '<br>')
       + '보관함 <b>' + t.archived + '개</b> · 글 데이터 합계 ' + mb(t.archivedCardBytes) + '<br>'
+      + (t.unprotectedBots ? '<span class="warn">보관된 봇 ' + t.unprotectedBots + '개의 그림에 보호 이름표가 없습니다. 아래 \'보관된 봇 다시 확인\'을 눌러 주세요.</span><br>' : '')
       + '<span class="note">서버 보관 사본(채팅 포함) ' + mb(t.storedCopyBytes) + '</span>';
     $('tabActive').setAttribute('aria-selected', String(tab === 'active'));
     $('tabArchived').setAttribute('aria-selected', String(tab === 'archived'));
     $('moveButton').textContent = tab === 'active' ? '고른 것 보관하기' : '고른 것 불러오기';
     $('keepOnlyButton').classList.toggle('hidden', tab !== 'active');
     const list = $('list');
+    list.classList.toggle('plain', !$('showCovers').checked);
     list.textContent = '';
-    const fragment = document.createDocumentFragment();
-    for (const item of visibleItems()) {
-      const row = document.createElement('label');
-      row.className = 'row';
-      const box = document.createElement('input');
-      box.type = 'checkbox';
-      box.checked = picked.has(item.id);
-      box.addEventListener('change', () => { box.checked ? picked.add(item.id) : picked.delete(item.id); count(); });
-      const name = document.createElement('span');
-      name.className = 'name';
-      name.textContent = item.name || '(이름 없음)';
-      const size = document.createElement('span');
-      size.className = 'size';
-      size.textContent = mb(item.cardBytes || 0) + ' · 채팅 ' + (item.chats || 0);
-      row.append(box, name, size);
-      fragment.append(row);
-    }
-    list.append(fragment);
+    shown = visibleItems();
+    drawn = 0;
+    if (!shown.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = $('search').value.trim() ? '찾는 봇이 없습니다.' : (tab === 'active' ? '쓰는 봇이 없습니다.' : '보관함이 비어 있습니다.');
+      list.append(empty);
+    } else drawMore();
     count();
   }
 
   function count() {
     const items = tab === 'active' ? data.active : data.archived;
     const bytes = items.filter(item => picked.has(item.id)).reduce((total, item) => total + (item.cardBytes || 0), 0);
-    $('selected').textContent = picked.size ? picked.size + '개 고름 · ' + mb(bytes) : '';
+    $('selected').textContent = picked.size ? picked.size + '개 고름 · ' + mb(bytes) : '옮길 봇을 고르세요';
     $('moveButton').disabled = busy || !picked.size;
     $('keepOnlyButton').disabled = busy || !picked.size;
   }
@@ -266,10 +393,10 @@
     }
   }
 
-  async function move(ids, direction, resume) {
+  async function move(ids, direction, resume, question) {
     if (busy || (!resume && !ids.length)) return;
     const word = direction === 'archive' ? '보관' : '불러오기';
-    if (!resume && !confirm(ids.length + '개를 ' + word + '할까요?')) return;
+    if (!resume && !confirm(question || (ids.length + '개를 ' + word + '할까요?'))) return;
     busy = true; count();
     settleWatch += 1;
     const startedAt = Date.now();
@@ -348,6 +475,7 @@
       '보관된 봇 ' + t.bots + '개, 그림 ' + t.images + '장 확인 (' + ((checked.totalMs || 0) / 1000).toFixed(1) + '초)',
       '이미 이름표 있음 ' + t.alreadyKept + '장 · 이번에 이름표 붙임 ' + t.added + '장 · 봇 폴더 안에 있음(폴더 방식 봇) ' + t.inFolder + '장 · 어디에도 없음 ' + t.missing + '장'
         + (t.copied ? ' · 복사 ' + t.copied + '장' : ''),
+      '목록 정보(태그·표지)를 채운 봇 ' + (t.listFilled || 0) + '개',
     ];
     for (const item of (checked.missing || []).slice(0, 10)) {
       lines.push(item.error ? '  확인 실패: ' + (item.name || item.id) + ' — ' + item.error
@@ -374,6 +502,11 @@
   $('tabArchived').addEventListener('click', () => { tab = 'archived'; picked = new Set(); render(); });
   $('search').addEventListener('input', render);
   $('sort').addEventListener('change', render);
+  try { $('showCovers').checked = localStorage.getItem('bangju.covers') === '1'; } catch {}
+  $('showCovers').addEventListener('change', () => {
+    try { localStorage.setItem('bangju.covers', $('showCovers').checked ? '1' : '0'); } catch {}
+    render();
+  });
   $('selectAll').addEventListener('click', () => { for (const item of visibleItems()) picked.add(item.id); render(); });
   $('selectNone').addEventListener('click', () => { picked = new Set(); render(); });
   $('selectTop').addEventListener('click', () => {
@@ -385,7 +518,10 @@
     $('version').textContent = '버전 ' + info.commit + (info.builtAt ? ' · ' + new Date(info.builtAt).toLocaleString('ko-KR') : '');
   }).catch(() => {});
   $('moveButton').addEventListener('click', () => move([...picked], tab === 'active' ? 'archive' : 'restore'));
-  $('keepOnlyButton').addEventListener('click', () => move(data.active.filter(item => !picked.has(item.id)).map(item => item.id), 'archive'));
+  $('keepOnlyButton').addEventListener('click', () => {
+    const rest = data.active.filter(item => !picked.has(item.id)).map(item => item.id);
+    move(rest, 'archive', false, '고른 ' + picked.size + '개만 남기고, 나머지 ' + rest.length + '개를 보관할까요?');
+  });
 })();
 </script>
 </body>

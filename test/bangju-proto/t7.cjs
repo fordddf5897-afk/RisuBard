@@ -12,7 +12,7 @@ const ok = (label, pass, detail = '') => { console.log(`${pass ? 'PASS' : 'FAIL'
     const ids = list.active.slice(0, 3).map(c => c.id);
     const r = await tab.post('/api/bangju/archive/move', { ids, direction: 'archive' });
     ok('the move reports the failure and the rollback', r.status === 500 && r.json?.code === 'BANGJU_ARCHIVE_ROLLED_BACK' && r.json.rolledBack === 3, JSON.stringify(r.json).slice(0, 200));
-    ok('all folders are back in place', ids.every(id => fs.existsSync(path.join(root, 'characters', id)) && !fs.existsSync(path.join(root, 'bangju/archive/characters', id))));
+    ok('all folders are back in place', ids.every(id => fs.existsSync(path.join(root, 'characters', id)) && !fs.existsSync(path.join(root, 'risubard/bangju-archive/characters', id))));
     const tab2 = await client(base).login();
     const after = (await tab2.readDb()).db;
     ok('the list is unchanged, in the same order', JSON.stringify(after.characters.map(c => [c.name, c.chats.map(x => x.name)])) === JSON.stringify(before.characters.map(c => [c.name, c.chats.map(x => x.name)])), `characters ${after.characters.length}`);

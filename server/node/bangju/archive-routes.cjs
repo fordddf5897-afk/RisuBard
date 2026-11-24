@@ -29,7 +29,7 @@ function botAssetReferences(metadata) {
 
 function registerBangjuArchiveRoutes(app, {
     auth, queue, repository, dataRoot, isBlocked, flush, hasExternalChanges, adopt,
-    revokeSessions, databaseBytes, kv, logger,
+    revokeSessions, databaseBytes, kv, activeCharacters, logger,
 }) {
     const archive = createBangjuArchive({
         dataRoot,
@@ -41,6 +41,7 @@ function registerBangjuArchiveRoutes(app, {
     });
     try {
         const recovered = archive.recover();
+        if (recovered.migrated?.length) logger?.info?.(`[Bangju archive] Moved ${recovered.migrated.join(', ')} to risubard/bangju-archive so backups carry the archive`);
         if (recovered.interrupted) {
             logger?.warn?.(`[Bangju archive] A move was interrupted; the index was rebuilt from the folders (${recovered.remaining} bot(s) of that batch still wait)`);
         }
@@ -60,13 +61,32 @@ function registerBangjuArchiveRoutes(app, {
         return (repository.loadSidebarIndex().characters || []).filter(character => !archivedIds.has(character.id));
     }
 
+    // The last time a bot was talked to, from the list index entry (its chats carry their last date).
+    const lastChatAt = entry => Math.max(0, entry?.updatedAt || 0, ...(entry?.chats || []).map(chat => chat?.lastDate || 0));
+
+    // Tags and cover of the bots in use come from the list the server already holds in memory.
+    function activeFacts() {
+        const facts = new Map();
+        try {
+            for (const character of (activeCharacters ? activeCharacters() : []) || []) {
+                if (typeof character?.chaId === 'string') facts.set(stableId(character.chaId, 'character'), archive.listFacts(character));
+            }
+        } catch { /* The list is shown without tags and covers. */ }
+        return facts;
+    }
+
     function listActive(archivedEntries) {
+        const facts = activeFacts();
         return activeEntries(archivedEntries).map(character => {
             let cardBytes = 0;
             try {
                 cardBytes = fs.statSync(path.join(dataRoot, repository.characterDirectoryPath(character.id), 'metadata.json')).size;
             } catch { /* Listed but unreadable: shown with size 0. */ }
-            return { id: character.id, name: character.name || '', cardBytes, chats: (character.chats || []).length, updatedAt: character.updatedAt || 0 };
+            const known = facts.get(character.id);
+            return {
+                id: character.id, name: character.name || '', cardBytes, chats: (character.chats || []).length,
+                lastChatAt: lastChatAt(character), tags: known?.tags || [], hasCover: Boolean(known?.image),
+            };
         });
     }
 
@@ -230,6 +250,7 @@ function registerBangjuArchiveRoutes(app, {
                 const archived = stored.map(entry => ({
                     id: entry.id, name: entry.name, cardBytes: entry.cardBytes, chats: entry.chats,
                     assetCount: entry.assetCount, archivedAt: entry.archivedAt,
+                    lastChatAt: lastChatAt(entry.sidebar), tags: entry.tags || [], hasCover: Boolean(entry.image),
                     ...(entry.missingAssets ? { missingAssets: entry.missingAssets } : {}),
                 }));
                 const sum = list => list.reduce((total, item) => total + (item.cardBytes || 0), 0);
@@ -238,6 +259,8 @@ function registerBangjuArchiveRoutes(app, {
                     totals: {
                         active: active.length, activeCardBytes: sum(active),
                         archived: archived.length, archivedCardBytes: sum(archived),
+                        // 그림 이름표가 아직 없는 보관 봇(백업을 되돌린 직후 등). 화면이 '다시 확인'을 권한다.
+                        unprotectedBots: archive.unprotectedCount(stored),
                         // 서버가 보관하는 전체 사본(채팅 포함). 앱이 열 때 받는 양이 아니다.
                         storedCopyBytes: databaseBytes(),
                         serverRequestLimitBytes: SERVER_REQUEST_LIMIT_BYTES,
@@ -246,6 +269,33 @@ function registerBangjuArchiveRoutes(app, {
                 });
             });
         } catch (error) { next(error); }
+    });
+
+    // 표지 그림. 보관된 봇은 보관함이 지키고 있는 그림에서, 쓰는 봇은 앱의 그림 창고에서 준다.
+    // 원본 크기 그대로라서 화면은 '표지 보기'를 켰을 때 보이는 줄만 받아 간다.
+    const COVER_TYPES = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', avif: 'image/avif' };
+    app.get('/api/bangju/archive/cover/:id', async (req, res) => {
+        if (!await auth(req, res)) return;
+        try {
+            const id = String(req.params.id || '');
+            let bytes = null;
+            let name = '';
+            const kept = archive.archivedCoverPath(id);
+            if (kept) {
+                bytes = fs.readFileSync(kept);
+                name = kept;
+            } else {
+                const stored = archive.listArchived().find(entry => entry.id === id);
+                name = stored ? (stored.image || '') : (activeFacts().get(id)?.image || '');
+                if (name && kv?.get) bytes = kv.get(`assets/${name}`);
+            }
+            if (!bytes || !bytes.length) return res.status(404).json({ error: 'No cover image' });
+            const type = COVER_TYPES[path.extname(name).slice(1).toLowerCase()] || 'application/octet-stream';
+            res.set('Cache-Control', 'private, max-age=86400').set('X-Content-Type-Options', 'nosniff').type(type).send(Buffer.from(bytes));
+        } catch (error) {
+            logger?.warn?.('[Bangju archive] Cover unavailable', error);
+            res.status(404).json({ error: 'No cover image' });
+        }
     });
 
     // 정리를 지금 한다(기다리는 중이면 앞당긴다). 화면과 검증 스크립트가 쓴다.

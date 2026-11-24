@@ -27,6 +27,11 @@ function client(base, password = 'test1234') {
     const api = {
         sessionId,
         headers,
+        // The app's own "delete this stored file" call (what any other cleanup path ends in).
+        async remove(key) {
+            const res = await rfetch(`${base}/api/remove`, { headers: headers({ 'file-path': Buffer.from(key, 'utf-8').toString('hex') }) });
+            return { status: res.status };
+        },
         async login() {
             // A server restart leaves dead pooled connections behind; the first call may hit one.
             for (let attempt = 0; attempt < 5; attempt++) {

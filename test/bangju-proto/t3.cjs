@@ -22,14 +22,22 @@ const keys = () => { const m = JSON.parse(fs.readFileSync(path.join(root, 'kv/ma
     ok('archive 3 bots with images', arch.status === 200 && arch.json.moved.length === 3, JSON.stringify({ assets: arch.json.assets, timings: arch.json.timings, assetStoreInUse: storeBefore }));
     ok('no image bytes were copied (links only)', arch.json.assets.copied === 0 && arch.json.assets.protected === 8 && arch.json.assets.missing === 0, JSON.stringify(arch.json.assets));
     tab = await client(base).login(); await tab.readDb();
+    // 1) The app's image cleanup counts archived bots' images as in use.
+    const before = keys().filter(x => x.startsWith('assets/'));
     const cleanup = await tab.post('/api/db/orphans/cleanup', {});
     note('app image cleanup while archived', `removed ${JSON.stringify(cleanup.json?.assets)}, objects ${JSON.stringify(cleanup.json?.objects)}`);
     const k = keys();
-    const storeFiles = fs.existsSync(path.join(root, 'asset-store')) ? fs.readdirSync(path.join(root, 'asset-store')).flatMap(d => fs.readdirSync(path.join(root, 'asset-store', d))) : [];
-    ok('cleanup removed the app-side names of archived bots', !k.includes('assets/bot3.png') && !k.includes('assets/chatonly-12.png') && storeFiles.length === 0, `left in assets/: ${k.filter(x => x.startsWith('assets/')).join(', ')}; asset-store files: ${storeFiles.length}`);
+    const storeFiles = () => (fs.existsSync(path.join(root, 'asset-store')) ? fs.readdirSync(path.join(root, 'asset-store')).flatMap(d => fs.readdirSync(path.join(root, 'asset-store', d)).filter(name => !name.endsWith('.sha256'))) : []);
+    ok('the app\'s cleanup leaves the images of archived bots alone', cleanup.status === 200 && cleanup.json.assets.count === 0 && k.includes('assets/bot3.png') && k.includes('assets/chatonly-12.png')
+        && before.every(key => k.includes(key)) && storeFiles().length === 1, `in assets/: ${k.filter(x => x.startsWith('assets/')).length} of ${before.length}; asset-store files: ${storeFiles().length}`);
     const keptRoot = path.join(root, 'bangju/archive/assets');
     const kept = fs.readdirSync(keptRoot).flatMap(id => fs.readdirSync(path.join(keptRoot, id)));
-    ok('the archive kept its own names for all 8 images', kept.length === 8, kept.map(name => name.length > 20 ? name.slice(0, 8) + '….png' : name).join(', '));
+    ok('the archive also keeps its own name for all 8 images', kept.length === 8, kept.map(name => name.length > 20 ? name.slice(0, 8) + '….png' : name).join(', '));
+    // 2) The safety net: some other path deletes the images anyway (here the app's plain "remove this file" call).
+    for (const name of kept) await tab.remove(`assets/${name}`);
+    const k2 = keys();
+    ok('another deleter removed them from the app\'s store', !k2.includes('assets/bot3.png') && !k2.includes('assets/chatonly-12.png') && storeFiles().length === 0,
+        `left in assets/: ${k2.filter(x => x.startsWith('assets/')).join(', ')}; asset-store files: ${storeFiles().length}`);
     const res = await tab.post('/api/bangju/archive/move', { ids, direction: 'restore' });
     ok('restore', res.status === 200 && res.json.moved.length === 3, JSON.stringify({ assets: res.json.assets, failed: res.json.failed }));
     tab = await client(base).login();

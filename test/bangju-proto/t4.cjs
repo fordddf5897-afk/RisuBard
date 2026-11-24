@@ -14,12 +14,14 @@ const keys = () => Object.keys(JSON.parse(fs.readFileSync(path.join(root, 'kv/ma
     const list0 = (await tab.get('/api/bangju/archive')).json;
     const a = list0.active.find(c => c.name.startsWith('Bot 0002')), b = list0.active.find(c => c.name.startsWith('Bot 0009'));
     const archiveRoot = path.join(root, 'bangju/archive');
+    const storeRoot = path.join(root, 'risubard/bangju-archive');
 
     // 1) Stopped right after a folder was renamed into the archive: journal still there, index and server list not updated.
     stop();
-    fs.mkdirSync(path.join(archiveRoot, 'characters'), { recursive: true });
+    fs.mkdirSync(path.join(storeRoot, 'characters'), { recursive: true });
+    fs.mkdirSync(archiveRoot, { recursive: true });
     fs.writeFileSync(path.join(archiveRoot, 'journal.json'), JSON.stringify({ schemaVersion: 1, direction: 'archive', startedAt: Date.now(), entries: [{ id: a.id, directory: a.id }, { id: b.id, directory: b.id }] }));
-    fs.renameSync(path.join(root, 'characters', a.id), path.join(archiveRoot, 'characters', a.id));
+    fs.renameSync(path.join(root, 'characters', a.id), path.join(storeRoot, 'characters', a.id));
     console.log('     (killed the server; moved Bot 0002 by hand, left Bot 0009 where it was, journal left behind)');
     console.log('    ', start());
     tab = await client(base).login();
@@ -31,7 +33,7 @@ const keys = () => Object.keys(JSON.parse(fs.readFileSync(path.join(root, 'kv/ma
     const status1 = (await tab.get('/api/bangju/archive/status')).json;
     ok('the interrupted batch is offered for continuing', fs.existsSync(path.join(archiveRoot, 'journal.json'))
         && status1.interrupted?.direction === 'archive' && status1.interrupted.total === 2 && status1.interrupted.remaining === 1, JSON.stringify(status1.interrupted));
-    const everywhere = id => [fs.existsSync(path.join(root, 'characters', id)), fs.existsSync(path.join(archiveRoot, 'characters', id))];
+    const everywhere = id => [fs.existsSync(path.join(root, 'characters', id)), fs.existsSync(path.join(storeRoot, 'characters', id))];
     ok('each bot is in exactly one place', everywhere(a.id).filter(Boolean).length === 1 && everywhere(b.id).filter(Boolean).length === 1);
     // Continue what was left of the interrupted batch: Bot 0009 follows Bot 0002 into the archive.
     const resumed = await tab.post('/api/bangju/archive/move', { resume: true });
@@ -49,11 +51,12 @@ const keys = () => Object.keys(JSON.parse(fs.readFileSync(path.join(root, 'kv/ma
     const c = list2.active.find(x => x.name === 'Bot 0009');
     const arch = await tab.post('/api/bangju/archive/move', { ids: [c.id], direction: 'archive' });
     tab = await client(base).login(); await tab.readDb();
-    await tab.post('/api/db/orphans/cleanup', {});
     const keptRoot = path.join(archiveRoot, 'assets');
+    // Something deletes the archived bot's images from the app's store (the app's own cleanup no longer does).
+    for (const name of fs.readdirSync(path.join(keptRoot, c.id))) await tab.remove(`assets/${name}`);
     ok('setup: Bot 0009 archived and its images cleaned out of assets/', arch.json?.moved?.length === 1 && !keys().includes('assets/bot9.png') && fs.existsSync(path.join(keptRoot, c.id, 'bot9.png')));
     stop();
-    fs.renameSync(path.join(archiveRoot, 'characters', c.id), path.join(root, 'characters', c.id));
+    fs.renameSync(path.join(storeRoot, 'characters', c.id), path.join(root, 'characters', c.id));
     console.log('     (killed the server; moved Bot 0009 back by hand, image names not returned)');
     console.log('    ', start());
     tab = await client(base).login();

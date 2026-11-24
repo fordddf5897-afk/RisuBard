@@ -36,9 +36,9 @@ const ok = (label, pass, detail = '') => { console.log(`${pass ? 'PASS' : 'FAIL'
     ok('archive names are links to the same files', kept.length === 3 && kept.includes('retired.png')
         && fs.statSync(path.join(root, 'bangju/archive/assets/bot1/retired.png')).ino === fs.statSync(path.join(root, 'kv/objects', retiredObject)).ino, kept.join(', '));
     const listed = archive.listArchived()[0];
-    const references = JSON.parse(fs.readFileSync(path.join(root, 'bangju/archive/references/bot1.json'), 'utf8'));
+    const references = JSON.parse(fs.readFileSync(path.join(root, 'risubard/bangju-archive/references/bot1.json'), 'utf8'));
     ok('the list and the reference file remember what was not found', listed.missingAssets === 1 && references.missing[0] === 'gone.png' && references.assets.length === 5);
-    ok('the image inside the bot folder moved with it', fs.readFileSync(path.join(root, 'bangju/archive/characters/bot1/assets/own.png'), 'utf8') === 'travels with the folder');
+    ok('the image inside the bot folder moved with it', fs.readFileSync(path.join(root, 'risubard/bangju-archive/characters/bot1/assets/own.png'), 'utf8') === 'travels with the folder');
 
     // A bot archived by the earlier version: the retired image has no archive name. Recheck adds it and changes nothing else.
     fs.rmSync(path.join(root, 'bangju/archive/assets/bot1/retired.png'));

@@ -35,7 +35,7 @@ async function settled(tab, since) {
         ok('the move itself answers right away', r.status === 200 && r.json.settle === 'pending' && r.json.moved.length === 2, JSON.stringify({ status: r.status, settle: r.json.settle }));
         const s = await settled(tab, t0);
         ok('the failed reload put both bots back', s.lastSettle.status === 'rolled-back' && s.lastSettle.rolledBack === 2 && !s.lastSettle.notRolledBack.length, JSON.stringify(s.lastSettle).slice(0, 200));
-        ok('folders are back in characters/', [a, b].every(x => fs.existsSync(path.join(root, 'characters', x.id)) && !fs.existsSync(path.join(root, 'bangju/archive/characters', x.id))));
+        ok('folders are back in characters/', [a, b].every(x => fs.existsSync(path.join(root, 'characters', x.id)) && !fs.existsSync(path.join(root, 'risubard/bangju-archive/characters', x.id))));
         const list = (await tab.get('/api/bangju/archive')).json;
         ok('lists are as before', list.totals.active === list0.totals.active && list.totals.archived === list0.totals.archived);
         tab = await client(base).login();
@@ -49,7 +49,7 @@ async function settled(tab, since) {
     fs.mkdirSync(memory, { recursive: true });
     fs.writeFileSync(path.join(memory, 'narrative-state.json'), JSON.stringify({ note: 'kept outside the bot folder' }));
     fs.writeFileSync(path.join(memory, 'events.jsonl'), '{"n":1}\n');
-    const memoryBefore = treeHash(path.join(root, 'risubard'));
+    const memoryBefore = treeHash(path.join(root, 'risubard', 'characters'));
 
     // 1) the move answers before the server reloads its list
     const stale = tab;
@@ -106,5 +106,5 @@ async function settled(tab, since) {
 
     // 6) RisuBard's own per-bot files were never touched (also not by the app's image cleanup)
     await tab.post('/api/db/orphans/cleanup', {});
-    ok('save slots / BardWiki / manuscript files untouched', treeHash(path.join(root, 'risubard')) === memoryBefore);
+    ok('save slots / BardWiki / manuscript files untouched', treeHash(path.join(root, 'risubard', 'characters')) === memoryBefore);
 })().catch(e => { console.error('TEST CRASHED', e); process.exit(1); });

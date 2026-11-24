@@ -16,7 +16,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
+// 작업용 자리: 그림 이름표, 진행 기록, 마지막 결과. 앱의 백업에는 들어가지 않는다.
 const ARCHIVE_DIRECTORY = path.join('bangju', 'archive');
+// 보관된 봇이 실제로 있는 자리. 앱의 전체 백업은 정해진 폴더만 담는데 risubard/는 그
+// 안에 있다(canonical-backup-inventory.cjs). 여기에 두면 연결 줄 없이 백업에 들어가고,
+// 원본 RisuBard도 이 백업을 읽을 수 있다(모르는 하위 폴더는 그대로 실어 나른다).
+const STORE_DIRECTORY = path.join('risubard', 'bangju-archive');
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
 
 function fsyncDirectory(directory) {
@@ -59,10 +64,27 @@ function isDirectory(target) {
 function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetReferences, collectNestedReferences, toStableId, kv }) {
     const root = path.resolve(dataRoot);
     const archiveRoot = path.join(root, ARCHIVE_DIRECTORY);
-    const archivedCharacters = path.join(archiveRoot, 'characters');
-    const referencesRoot = path.join(archiveRoot, 'references');
-    const indexPath = path.join(archiveRoot, 'index.json');
+    const storeRoot = path.join(root, STORE_DIRECTORY);
+    const archivedCharacters = path.join(storeRoot, 'characters');
+    const referencesRoot = path.join(storeRoot, 'references');
+    const indexPath = path.join(storeRoot, 'index.json');
     const journalPath = path.join(archiveRoot, 'journal.json');
+
+    // Earlier versions kept the bot folders under bangju/archive/. Move them (three
+    // renames on the same disk) so that the app's backup carries them.
+    function migrateLayout() {
+        const moved = [];
+        for (const name of ['characters', 'references', 'index.json']) {
+            const from = path.join(archiveRoot, name);
+            const to = path.join(storeRoot, name);
+            if (!fs.existsSync(from) || fs.existsSync(to)) continue;
+            fs.mkdirSync(storeRoot, { recursive: true });
+            fs.renameSync(from, to);
+            moved.push(name);
+        }
+        if (moved.length) { fsyncDirectory(storeRoot); fsyncDirectory(archiveRoot); }
+        return moved;
+    }
     const activeCharacters = path.join(root, 'characters');
 
     function inside(parent, child) {
@@ -71,6 +93,16 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
             throw new Error('Unsafe archive folder name');
         }
         return child;
+    }
+
+    // The few facts the list shows besides the name: tags and which image is the cover.
+    function listFacts(metadata) {
+        const tags = Array.isArray(metadata?.tags)
+            ? metadata.tags.filter(tag => typeof tag === 'string' && tag.trim()).slice(0, 8).map(tag => tag.trim().slice(0, 40))
+            : [];
+        const image = typeof metadata?.image === 'string' && /^assets\/[A-Za-z0-9._-]+$/.test(metadata.image)
+            ? metadata.image.slice('assets/'.length) : '';
+        return { tags, image };
     }
 
     // What the archive list shows for one bot, read from its own folder.
@@ -111,6 +143,7 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                 cardBytes: fs.statSync(metadataPath).size,
                 chats,
                 assetCount: assets.length,
+                ...listFacts(metadata),
             },
             assets,
         };
@@ -271,13 +304,15 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
             atomicWriteJson(path.join(referencesRoot, `${id}.json`), { schemaVersion: 1, assets });
             changed = true;
         }
-        if (changed) atomicWriteJson(indexPath, { schemaVersion: 1, updatedAt: Date.now(), characters: kept });
-        return { schemaVersion: 1, updatedAt: index.updatedAt, characters: kept };
+        const updatedAt = changed ? Date.now() : index.updatedAt;
+        if (changed) atomicWriteJson(indexPath, { schemaVersion: 1, updatedAt, characters: kept });
+        return { schemaVersion: 1, updatedAt, characters: kept };
     }
 
     // A journal left behind means the server stopped during a move. Every
     // folder is already in exactly one place, so only the index needs repair.
     function recover() {
+        const migrated = migrateLayout();
         const journal = readJson(journalPath);
         const index = reconcileIndex();
         // Kept image names whose bot is not archived (a move stopped half way):
@@ -293,7 +328,7 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
         // The journal stays while some bots of that batch still wait, so the batch can be continued.
         const pending = pendingBatch();
         if (journal && !pending) fs.rmSync(journalPath, { force: true });
-        return { interrupted: Boolean(journal), remaining: pending?.remaining.length ?? 0, archived: index.characters.length, returnedAssets: returned };
+        return { interrupted: Boolean(journal), remaining: pending?.remaining.length ?? 0, archived: index.characters.length, returnedAssets: returned, migrated };
     }
 
     // A batch that stopped half way (the server went down): the bots that had not moved yet.
@@ -432,7 +467,7 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
     // adds names; nothing is moved or removed.
     async function recheck({ onProgress, pause } = {}) {
         const index = reconcileIndex();
-        const totals = { bots: index.characters.length, images: 0, alreadyKept: 0, added: 0, copied: 0, inFolder: 0, missing: 0 };
+        const totals = { bots: index.characters.length, images: 0, alreadyKept: 0, added: 0, copied: 0, inFolder: 0, missing: 0, listFilled: 0, listsRebuilt: 0 };
         const report = [];
         let changed = false;
         let step = 0;
@@ -440,9 +475,22 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
         for (const entry of index.characters) {
             step += 1;
             try {
+                // Bots archived by an earlier version have no tags or cover name in the list yet.
+                if (entry.image === undefined) {
+                    Object.assign(entry, listFacts(JSON.parse(fs.readFileSync(path.join(archivedCharacters, entry.directory, 'metadata.json'), 'utf8'))));
+                    totals.listFilled += 1;
+                    changed = true;
+                }
                 const referencesPath = path.join(referencesRoot, `${entry.id}.json`);
-                const assets = readJson(referencesPath)?.assets;
-                const names = Array.isArray(assets) ? assets : [];
+                let assets = readJson(referencesPath)?.assets;
+                if (!Array.isArray(assets)) {
+                    // The bot's image list is gone (for example after a backup was restored): read it again from the bot's files.
+                    assets = summarize(path.join(archivedCharacters, entry.directory), entry.directory).assets;
+                    atomicWriteJson(referencesPath, { schemaVersion: 1, assets });
+                    totals.listsRebuilt += 1;
+                    changed = true;
+                }
+                const names = assets;
                 let kept = new Set();
                 try { kept = new Set(fs.readdirSync(assetLinks(entry.id))); } catch { /* nothing kept yet */ }
                 const waiting = names.filter(name => !kept.has(name));
@@ -475,17 +523,56 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
         return { totals, missing: report };
     }
 
-    // Asset file names that archived bots still need.
-    function referencedAssets() {
-        const names = new Set();
-        for (const entry of reconcileIndex().characters) {
-            const references = readJson(path.join(referencesRoot, `${entry.id}.json`));
-            for (const name of references?.assets || []) names.add(name);
+    // Archived bots that use images but have no archive names for them yet (for
+    // example right after a backup was restored). "다시 확인" gives them their names.
+    function unprotectedCount(entries = reconcileIndex().characters) {
+        let count = 0;
+        for (const entry of entries) {
+            if ((entry.assetCount || 0) > (entry.missingAssets || 0) && !fs.existsSync(assetLinks(entry.id))) count += 1;
         }
-        return names;
+        return count;
     }
 
-    return { archiveRoot, listArchived, move, recover, recheck, pendingBatch, clearPendingBatch, referencedAssets };
+    // The kept copy of an archived bot's cover image, if it has one.
+    function archivedCoverPath(id) {
+        const entry = loadIndex().characters.find(item => item.id === id);
+        if (!entry?.image) return null;
+        const file = path.join(assetLinks(id), entry.image);
+        return fs.existsSync(file) ? file : null;
+    }
+
+    // Asset file names that archived bots still need. The app's image cleanup adds
+    // these to "in use" (one line in server.cjs), so archived bots keep their images
+    // in the app's own store and in its backups. Read once per change of the archive.
+    let referenced = null;
+    let referencedTimer = null;
+    function referencedAssets() {
+        const index = reconcileIndex();
+        const stamp = `${index.updatedAt}:${index.characters.length}`;
+        if (referenced?.stamp === stamp) return referenced.names;
+        const names = new Set();
+        for (const entry of index.characters) {
+            const references = readJson(path.join(referencesRoot, `${entry.id}.json`));
+            // A bot whose list is unreadable would lose its protection silently: refuse instead.
+            if (!Array.isArray(references?.assets)) throw new Error(`Archive image list is missing for ${entry.name || entry.id}`);
+            for (const name of references.assets) names.add(name);
+        }
+        referenced = { stamp, names };
+        // The list can be large (one name per image); let it go when nobody asks for a while.
+        clearTimeout(referencedTimer);
+        referencedTimer = setTimeout(() => { referenced = null; }, 5 * 60 * 1000);
+        referencedTimer.unref?.();
+        return names;
+    }
+    // For displays that only count: never fails.
+    function referencedAssetsOrEmpty() {
+        try { return referencedAssets(); } catch { return new Set(); }
+    }
+
+    return {
+        archiveRoot, storeRoot, listArchived, listFacts, archivedCoverPath, unprotectedCount, move, recover, recheck,
+        pendingBatch, clearPendingBatch, referencedAssets, referencedAssetsOrEmpty,
+    };
 }
 
-module.exports = { ARCHIVE_DIRECTORY, createBangjuArchive };
+module.exports = { ARCHIVE_DIRECTORY, STORE_DIRECTORY, createBangjuArchive };

@@ -32,7 +32,7 @@ const stripOrder = db => Object.fromEntries(db.characters.map(c => [c.chaId, c])
     const targets = [list0.active[0], withAsset, list0.active[list0.active.length - 1]];
     const ids = targets.map(t => t.id);
     const folderOf = id => path.join(root, 'characters', id);
-    const archivedOf = id => path.join(root, 'bangju/archive/characters', id);
+    const archivedOf = id => path.join(root, 'risubard/bangju-archive/characters', id);
     const hashesBefore = Object.fromEntries(ids.map(id => [id, treeHash(folderOf(id))]));
 
     const moved = await tabA.post('/api/bangju/archive/move', { ids, direction: 'archive' });
