@@ -1,12 +1,13 @@
 <script lang="ts">
-    import { ArrowLeftIcon, CheckIcon, MessageCircleIcon, PencilIcon, PlayIcon, SettingsIcon, UserRoundCogIcon } from '@lucide/svelte'
+    import { ArrowLeftIcon, CheckIcon, FolderIcon, MessageCircleIcon, PencilIcon, PlayIcon, SettingsIcon, UserRoundCogIcon } from '@lucide/svelte'
     import { DBState, openPersonaManager } from 'src/ts/stores.svelte'
     import type { character } from 'src/ts/storage/database.svelte'
     import { listStartSituations, readEasyMeta, toEasyWork, withEasyMeta, withStartTitle, type StartSituation } from 'src/ts/easyMode/works'
     import { defaultPersonaId, listPersonaChoices, saveWorkEdit } from 'src/ts/easyMode/chatStart'
     import { formatPreviewTime, toChatPreviewText } from 'src/ts/risubard/chatPreviewText'
     import { loadChatPreview } from 'src/ts/risubard/chatPreview'
-    import { alertInput } from 'src/ts/alert'
+    import { alertInput, alertSelect } from 'src/ts/alert'
+    import { NO_FOLDER, folderOfWorks, listFolders, moveWorkToFolder } from 'src/ts/easyMode/folders'
     import EasyImage from './EasyImage.svelte'
     import EasyNotes from './EasyNotes.svelte'
 
@@ -25,6 +26,21 @@
     const userName = $derived(DBState.db.username || '나')
     const situations = $derived(chara ? listStartSituations(chara, { user: userName }) : [])
     const personas = $derived(listPersonaChoices(chara))
+
+    // The work's folder (RisuAI's own folder list).
+    const folders = $derived(work ? listFolders(DBState.db.characterOrder, [work]) : [])
+    const folderId = $derived(folderOfWorks(DBState.db.characterOrder).get(chaId) ?? NO_FOLDER)
+    const folderName = $derived(folders.find((item) => item.id === folderId)?.name ?? '')
+
+    async function chooseFolder() {
+        const options = [...folders.map((item) => (item.id === folderId ? `${item.name} (지금)` : item.name)), folderId === NO_FOLDER ? '폴더 없음 (지금)' : '폴더에서 빼기', '취소']
+        const answer = await alertSelect(options, '폴더 고르기')
+        // The dialog answers with the number of the chosen line; anything else means it was closed.
+        if (!/^\d+$/.test(String(answer))) return
+        const picked = Number(answer)
+        if (picked > folders.length) return
+        moveWorkToFolder(DBState.db, chaId, picked === folders.length ? NO_FOLDER : folders[picked].id)
+    }
 
     let selectedStart = $state<number | null>(null)
     let selectedPersona = $state<string | null>(null)
@@ -133,6 +149,12 @@
                 </button>
                 {#if work.creator}
                     <p class="mt-1 text-xs text-textcolor2">@{work.creator}</p>
+                {/if}
+                {#if folders.length}
+                    <button type="button" class="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-darkborderc bg-darkbg px-3 py-1 text-xs text-textcolor2 hover:border-borderc hover:text-textcolor" data-easy-work-folder onclick={chooseFolder}>
+                        <FolderIcon size={13} class="shrink-0" />
+                        <span class="min-w-0 truncate">{folderName ? `폴더: ${folderName}` : '폴더에 넣기'}</span>
+                    </button>
                 {/if}
                 {#if work.tags.length}
                     <div class="mt-3 flex flex-wrap gap-1.5">

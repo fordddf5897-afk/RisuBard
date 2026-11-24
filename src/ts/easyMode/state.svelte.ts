@@ -2,6 +2,7 @@
 // so nothing is added to the RisuAI database and backups stay upstream-compatible.
 import { writable } from 'svelte/store'
 import { additionalHamburgerMenu, additionalSettingsMenu, settingsOpen, type MenuDef } from '../stores.svelte'
+import { isNodeServer } from '../platform'
 
 const PREFS_KEY = 'risu-easy-mode:prefs:v1'
 
@@ -86,6 +87,8 @@ export const easyView = $state({
     page: 'home' as EasyPage,
     /** chaId of the work shown on the detail or chat page. */
     chaId: '' as string,
+    /** Folder shown on the home: null is every work, '' the works outside folders, otherwise a folder id. Kept while the app is open, so coming back from a work returns to the same folder. */
+    homeFolder: null as string | null,
 })
 
 // The classic layout gets a way back through the same extension points plugins
@@ -110,4 +113,36 @@ export function registerClassicEntry(): void {
     if (!additionalSettingsMenu.some((item) => item.id === `${ENTRY_ID}-settings`)) additionalSettingsMenu.push(entry('settings'))
 }
 
-if (typeof window !== 'undefined') registerClassicEntry()
+// The archive page (server/node/bangju) moves unused bots out of the app. Only the
+// node server serves it. It opens in its own tab: the app tab keeps saving, and the
+// page works even when the app itself is too heavy to open.
+export const ARCHIVE_PATH = '/bangju/archive'
+export const archiveAvailable: boolean = isNodeServer
+
+export function openArchive(): void {
+    window.open(ARCHIVE_PATH, '_blank', 'noopener')
+}
+
+const ARCHIVE_ENTRY_ID = 'bangju-archive-entry'
+const ARCHIVE_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>'
+
+/** '보관함 관리' in the classic sidebar menu and settings navigation, beside the easy-mode entry. */
+export function registerArchiveEntry(available: boolean = archiveAvailable): void {
+    if (!available) return
+    const entry = (layoutKey: string): MenuDef => ({
+        name: '보관함 관리',
+        icon: ARCHIVE_ICON,
+        iconType: 'html',
+        id: `${ARCHIVE_ENTRY_ID}-${layoutKey}`,
+        pluginName: 'easy-mode',
+        layoutKey,
+        callback: () => openArchive(),
+    })
+    if (!additionalHamburgerMenu.some((item) => item.id === `${ARCHIVE_ENTRY_ID}-sidebar`)) additionalHamburgerMenu.push(entry('sidebar'))
+    if (!additionalSettingsMenu.some((item) => item.id === `${ARCHIVE_ENTRY_ID}-settings`)) additionalSettingsMenu.push(entry('settings'))
+}
+
+if (typeof window !== 'undefined') {
+    registerClassicEntry()
+    registerArchiveEntry()
+}

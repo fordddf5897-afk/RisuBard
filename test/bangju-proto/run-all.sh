@@ -2,7 +2,7 @@
 # 방주 전체 자동 점검: 지금까지 만든 방주 기능의 검사와 앱의 서버 테스트를 처음부터 끝까지 돌린다.
 #   ./run-all.sh            보통 점검
 #   ./run-all.sh --scale    큰 가짜 자료(봇 1,150개)로 하는 점검까지 (메모리 5GB쯤 필요, 몇 분 더 걸림)
-#   ./run-all.sh --no-app   앱의 서버 테스트는 건너뛴다
+#   ./run-all.sh --no-app   앱의 서버 테스트, 간편 모드 단위 시험, 앱을 지어서 하는 화면 시험은 건너뛴다
 # 새 기능을 만들면 그 검사를 여기에 더한다. 하나라도 실패하면 실패로 끝난다.
 DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$DIR/../.." && pwd)"
@@ -63,6 +63,12 @@ if [ -n "$CHROME" ]; then
   if NODE_PATH="${PUPPETEER_DIR:-$WORK/browser}/node_modules" node -e "require('puppeteer-core')" 2> /dev/null; then
     start BANGJU_ARCHIVE_SETTLE_DELAY_MS=2000 && seeded && check "화면(실제 브라우저)" env NODE_PATH="${PUPPETEER_DIR:-$WORK/browser}/node_modules" CHROME="$CHROME" node page-test.cjs "$BASE" "$WORK/page.png"; finish
     start BANGJU_ARCHIVE_SETTLE=now && seeded && check "화면의 폴더 보기(실제 브라우저)" env NODE_PATH="${PUPPETEER_DIR:-$WORK/browser}/node_modules" CHROME="$CHROME" node page-folders.cjs "$BASE"; finish
+    # the app itself: built first, then driven in the browser against a seeded server
+    if [ $APP -eq 1 ]; then
+      if (cd "$REPO" && NODE_OPTIONS=--max-old-space-size=4096 node node_modules/vite/bin/vite.js build > "$WORK/build.log" 2>&1); then
+        start BANGJU_ARCHIVE_SETTLE=now && node seed2.cjs "$BASE" 240 > /dev/null && check "간편 모드 화면(실제 브라우저, 실제 앱)" env NODE_PATH="${PUPPETEER_DIR:-$WORK/browser}/node_modules" CHROME="$CHROME" node page-easy.cjs "$BASE" "$ROOT"; finish
+      else FAILED=$((FAILED + 1)); SUMMARY="$SUMMARY\n  실패  앱 짓기"; echo "=== 앱 짓기: 실패"; tail -30 "$WORK/build.log"; fi
+    fi
   else SKIPPED=$((SKIPPED + 1)); SUMMARY="$SUMMARY\n  건너뜀  화면(실제 브라우저): puppeteer-core를 받지 못함"; fi
 else SKIPPED=$((SKIPPED + 1)); SUMMARY="$SUMMARY\n  건너뜀  화면(실제 브라우저): Chrome 없음"; fi
 
@@ -72,6 +78,10 @@ if [ $SCALE -eq 1 ]; then
 fi
 
 if [ $APP -eq 1 ]; then
+  out="$(cd "$REPO" && node node_modules/vitest/vitest.mjs run src/ts/easyMode 2>&1)"; code=$?
+  line="$(grep -E '^ +Tests ' <<< "$out" | tail -1 | sed 's/^ *//')"
+  if [ $code -eq 0 ]; then PASSED=$((PASSED + 1)); SUMMARY="$SUMMARY\n  통과  간편 모드 단위 시험 ($line)"; echo "=== 간편 모드 단위 시험: 통과 ($line)"
+  else FAILED=$((FAILED + 1)); SUMMARY="$SUMMARY\n  실패  간편 모드 단위 시험 ($line)"; echo "=== 간편 모드 단위 시험: 실패"; tail -40 <<< "$out"; fi
   out="$(cd "$REPO" && pnpm exec vitest run --config vitest.config.server.ts 2>&1)"; code=$?
   line="$(grep -E '^ +Tests ' <<< "$out" | tail -1 | sed 's/^ *//')"
   if [ $code -eq 0 ]; then PASSED=$((PASSED + 1)); SUMMARY="$SUMMARY\n  통과  앱의 서버 테스트 ($line)"; echo "=== 앱의 서버 테스트: 통과 ($line)"
