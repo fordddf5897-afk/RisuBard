@@ -117,29 +117,43 @@ export function registerClassicEntry(): void {
 // node server serves it. It opens in its own tab: the app tab keeps saving, and the
 // page works even when the app itself is too heavy to open.
 export const ARCHIVE_PATH = '/bangju/archive'
+// The update screen shows whether a newer version exists and what to press; it changes nothing itself.
+export const UPDATE_PATH = '/bangju/update'
 export const archiveAvailable: boolean = isNodeServer
 
 export function openArchive(): void {
     window.open(ARCHIVE_PATH, '_blank', 'noopener')
 }
 
+export function openUpdateCheck(): void {
+    window.open(UPDATE_PATH, '_blank', 'noopener')
+}
+
 const ARCHIVE_ENTRY_ID = 'bangju-archive-entry'
+const UPDATE_ENTRY_ID = 'bangju-update-entry'
+const UPDATE_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>'
 const ARCHIVE_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>'
 
-/** '보관함 관리' in the classic sidebar menu and settings navigation, beside the easy-mode entry. */
+/** '보관함 관리' and '업데이트 확인' in the classic sidebar menu and settings navigation, beside the easy-mode entry. */
 export function registerArchiveEntry(available: boolean = archiveAvailable): void {
     if (!available) return
-    const entry = (layoutKey: string): MenuDef => ({
-        name: '보관함 관리',
-        icon: ARCHIVE_ICON,
-        iconType: 'html',
-        id: `${ARCHIVE_ENTRY_ID}-${layoutKey}`,
-        pluginName: 'easy-mode',
-        layoutKey,
-        callback: () => openArchive(),
-    })
-    if (!additionalHamburgerMenu.some((item) => item.id === `${ARCHIVE_ENTRY_ID}-sidebar`)) additionalHamburgerMenu.push(entry('sidebar'))
-    if (!additionalSettingsMenu.some((item) => item.id === `${ARCHIVE_ENTRY_ID}-settings`)) additionalSettingsMenu.push(entry('settings'))
+    const entries: { id: string; name: string; icon: string; open: () => void }[] = [
+        { id: ARCHIVE_ENTRY_ID, name: '보관함 관리', icon: ARCHIVE_ICON, open: openArchive },
+        { id: UPDATE_ENTRY_ID, name: '업데이트 확인', icon: UPDATE_ICON, open: openUpdateCheck },
+    ]
+    for (const item of entries) {
+        const entry = (layoutKey: string): MenuDef => ({
+            name: item.name,
+            icon: item.icon,
+            iconType: 'html',
+            id: `${item.id}-${layoutKey}`,
+            pluginName: 'easy-mode',
+            layoutKey,
+            callback: () => item.open(),
+        })
+        if (!additionalHamburgerMenu.some((menu) => menu.id === `${item.id}-sidebar`)) additionalHamburgerMenu.push(entry('sidebar'))
+        if (!additionalSettingsMenu.some((menu) => menu.id === `${item.id}-settings`)) additionalSettingsMenu.push(entry('settings'))
+    }
 }
 
 if (typeof window !== 'undefined') {

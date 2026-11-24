@@ -1,7 +1,7 @@
 <script lang="ts">
-    import { ArchiveIcon, ArchiveRestoreIcon, CheckIcon, ChevronRightIcon, DownloadIcon, ExternalLinkIcon, ImageIcon, LayoutPanelLeftIcon, PlugIcon, PuzzleIcon, SettingsIcon, SparklesIcon, UploadIcon } from '@lucide/svelte'
+    import { ArchiveIcon, ArchiveRestoreIcon, CheckIcon, ChevronRightIcon, DownloadIcon, ExternalLinkIcon, ImageIcon, LayoutPanelLeftIcon, PlugIcon, PuzzleIcon, RefreshCwIcon, SettingsIcon, SparklesIcon, UploadIcon } from '@lucide/svelte'
     import { DBState, OtherBotsSubmenuIndex } from 'src/ts/stores.svelte'
-    import { ARCHIVE_PATH, archiveAvailable, easyPrefs, saveEasyPrefs, setEasyModeEnabled } from 'src/ts/easyMode/state.svelte'
+    import { ARCHIVE_PATH, UPDATE_PATH, archiveAvailable, easyPrefs, saveEasyPrefs, setEasyModeEnabled } from 'src/ts/easyMode/state.svelte'
     import { importAppSkinFile, installAppSkinFromText, isAppSkinSuppressed, listAppSkins, selectAppSkin } from 'src/ts/gui/appSkinRuntime'
     import { appSkinSwatch, defaultAppSkinSwatch } from 'src/ts/gui/appSkinSwatch'
     import { openSettings, SettingsRoute } from 'src/ts/routing'
@@ -72,12 +72,17 @@
 
     {#if archiveAvailable}
         <section aria-labelledby="easy-archive-title">
-            <h3 id="easy-archive-title" class="text-base font-bold">보관함</h3>
-            <p class="mt-1 text-sm text-textcolor2">안 쓰는 작품을 보관함으로 옮기면 앱이 가벼워져요. 채팅과 그림도 같이 보관되고, 불러오면 원래 폴더로 돌아와요. 새 창에서 열려요.</p>
+            <h3 id="easy-archive-title" class="text-base font-bold">보관함 · 업데이트</h3>
+            <p class="mt-1 text-sm text-textcolor2">안 쓰는 작품을 보관함으로 옮기면 앱이 가벼워져요. 채팅과 그림도 같이 보관되고, 불러오면 원래 폴더로 돌아와요. 업데이트 확인은 새 버전이 있는지와 받는 순서를 보여 줘요. 둘 다 새 창에서 열려요.</p>
             <div class="mt-3 flex flex-col overflow-hidden rounded-xl border border-darkborderc bg-darkbg">
                 <a class="easy-link" data-easy-open-archive href={ARCHIVE_PATH} target="_blank" rel="noopener">
                     <ArchiveIcon size={18} class="shrink-0 text-textcolor2" />
                     <span class="min-w-0 flex-1">보관함 관리</span>
+                    <ExternalLinkIcon size={16} class="shrink-0 text-textcolor2" />
+                </a>
+                <a class="easy-link" data-easy-open-update href={UPDATE_PATH} target="_blank" rel="noopener">
+                    <RefreshCwIcon size={18} class="shrink-0 text-textcolor2" />
+                    <span class="min-w-0 flex-1">업데이트 확인</span>
                     <ExternalLinkIcon size={16} class="shrink-0 text-textcolor2" />
                 </a>
             </div>

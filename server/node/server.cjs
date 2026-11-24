@@ -4680,6 +4680,9 @@ const bangjuArchive = require('./bangju/archive-routes.cjs').registerBangjuArchi
     logger,
 });
 
+// bangju: 업데이트 확인 화면(U2). 코드는 server/node/bangju/에 있다.
+require('./bangju/update-routes.cjs').registerBangjuUpdateRoutes(app, { auth: checkAuth, dataRoot: savePath, logger });
+
 require('./asset-store-routes.cjs').registerAssetStoreRoutes(app, {
     auth: checkAuth,
     activeSession: checkActiveSession,
