@@ -570,7 +570,8 @@
   function describeRecheck(checked) {
     const t = checked.totals;
     const lines = [
-      '보관된 봇 ' + t.bots + '개, 그림 ' + t.images + '장 확인 (' + ((checked.totalMs || 0) / 1000).toFixed(1) + '초)',
+      // 글자로만 나오는 이름은 그림이 아니므로 그림 수에서 뺀다.
+      '보관된 봇 ' + t.bots + '개, 그림 ' + (t.images - (t.unmatched || 0)) + '장 확인 (' + ((checked.totalMs || 0) / 1000).toFixed(1) + '초)',
       '이미 이름표 있음 ' + t.alreadyKept + '장 · 이번에 이름표 붙임 ' + t.added + '장 · 봇 폴더 안에 있음(폴더 방식 봇) ' + t.inFolder + '장 · 어디에도 없음 ' + t.missing + '장',
       '이번에 붙인 것 가운데: 모듈 폴더에 있던 것 ' + (t.inModule || 0) + '장 · 앱에서 읽어 사본을 뜬 것 ' + (t.viaApp || 0) + '장'
         + (t.copied && t.copied !== t.viaApp ? ' · 복사 ' + (t.copied - (t.viaApp || 0)) + '장' : ''),
