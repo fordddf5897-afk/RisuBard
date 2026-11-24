@@ -27,16 +27,19 @@ const ok = (label, pass, detail = '') => { console.log(`${pass ? 'PASS' : 'FAIL'
     write('index/module-asset-replicas.json', JSON.stringify({ schemaVersion: 1, modules: { mod1: { enabled: true, directory: 'Pack', entries: [{ key: 'assets/modulepic.png', filename: 'modulepic.png', hash: 'z', size: 1 }] } } }));
     write('characters/bot1/metadata.json', JSON.stringify({ chaId: 'bot1', name: 'Bot One', image: 'assets/listed.png',
         additionalAssets: [['a', 'assets/retired.png', 'png'], ['b', `assets/${storeName}`, 'png'], ['c', 'assets/own.png', 'png'], ['d', 'assets/gone.png', 'png'],
-            ['e', 'assets/shared.png', 'png'], ['f', 'assets/modulepic.png', 'png'], ['g', 'assets/onlyapp.png', 'png']] }));
+            ['e', 'assets/shared.png', 'png'], ['f', 'assets/modulepic.png', 'png'], ['g', 'assets/onlyapp.png', 'png']],
+        // a picture name that only appears in the card's text; no picture was ever stored under it
+        firstMessage: 'look: <img src="assets/in-text.png">' }));
     write('characters/bot1/assets/own.png', 'travels with the folder');
     const names = metadata => new Set([metadata.image, ...(metadata.additionalAssets || []).map(asset => asset[1])].filter(Boolean).map(key => key.slice('assets/'.length)));
+    const withText = metadata => new Set([...names(metadata), ...String(metadata.firstMessage || '').split('"').filter(part => part.startsWith('assets/')).map(key => key.slice('assets/'.length))]);
     const returned = [];
     // what the app's store answers for (a copy in another bot's folder is listed there too, as a retired entry)
     const present = new Set(['assets/listed.png', 'assets/retired.png', `assets/${storeName}`, 'assets/shared.png', 'assets/modulepic.png', 'assets/onlyapp.png']);
     // an image the app can show although none of the places this code knows holds a file for it
     const appOnly = key => (key === 'assets/onlyapp.png' ? Buffer.from('only the app can read this') : null);
     const archive = createBangjuArchive({
-        dataRoot: root, resolveActiveDirectory: id => path.join('characters', id), collectAssetReferences: names,
+        dataRoot: root, resolveActiveDirectory: id => path.join('characters', id), collectAssetReferences: withText, collectDeclaredReferences: names,
         collectNestedReferences: null, toStableId: id => id, kv: { has: key => present.has(key), get: appOnly, set: (key, bytes) => { returned.push([key, String(bytes)]); present.add(key); } },
     });
     const progress = [];
@@ -48,6 +51,8 @@ const ok = (label, pass, detail = '') => { console.log(`${pass ? 'PASS' : 'FAIL'
         && moved.missing.length === 1 && moved.missing[0].examples[0] === 'gone.png' && moved.missing[0].name === 'Bot One', JSON.stringify({ assets: moved.assets, missing: moved.missing }));
     ok('an image only the app can read is kept as a real copy', moved.assets.viaApp === 1 && moved.assets.copied === 1
         && fs.readFileSync(path.join(root, 'bangju/archive/assets/bot1/onlyapp.png'), 'utf8') === 'only the app can read this');
+    ok('a name that only appears in the card\'s text is not counted as a lost picture', moved.assets.unmatched === 1 && moved.mentions.length === 1
+        && moved.mentions[0].count === 1 && moved.mentions[0].examples[0] === 'in-text.png', JSON.stringify(moved.mentions));
     ok('the report says what is known about the lost image', JSON.stringify(moved.missing[0].why) === JSON.stringify({ storeNames: 0, listed: 0, folderFiles: 1, packaged: false }), JSON.stringify(moved.missing[0].why));
     const kept = fs.readdirSync(path.join(root, 'bangju/archive/assets/bot1')).sort();
     ok('archive names are links to the same files', kept.length === 6 && kept.includes('retired.png')
@@ -56,17 +61,18 @@ const ok = (label, pass, detail = '') => { console.log(`${pass ? 'PASS' : 'FAIL'
         && fs.statSync(path.join(root, 'bangju/archive/assets/bot1/retired.png')).ino === fs.statSync(path.join(root, 'kv/objects', retiredObject)).ino, kept.join(', '));
     const listed = archive.listArchived()[0];
     const references = JSON.parse(fs.readFileSync(path.join(root, 'risubard/bangju-archive/references/bot1.json'), 'utf8'));
-    ok('the list and the reference file remember what was not found', listed.missingAssets === 1 && references.missing[0] === 'gone.png' && references.assets.length === 8);
+    ok('the list and the reference file remember what was not found', listed.missingAssets === 1 && references.missing[0] === 'gone.png' && references.missing.length === 1
+        && references.assets.length === 9 && references.unmatched[0] === 'in-text.png' && listed.protectedAssets === 6);
     ok('the image inside the bot folder moved with it', fs.readFileSync(path.join(root, 'risubard/bangju-archive/characters/bot1/assets/own.png'), 'utf8') === 'travels with the folder');
 
     // A bot archived by the earlier version: the retired image has no archive name. Recheck adds it and changes nothing else.
     fs.rmSync(path.join(root, 'bangju/archive/assets/bot1/retired.png'));
     const checked = await archive.recheck();
-    ok('recheck gives the unprotected image its archive name', checked.totals.bots === 1 && checked.totals.images === 8 && checked.totals.alreadyKept === 5 && checked.totals.added === 1
-        && checked.totals.inFolder === 1 && checked.totals.missing === 1 && checked.missing[0].why.folderFiles === 1 && checked.missing[0].examples[0] === 'gone.png'
+    ok('recheck gives the unprotected image its archive name', checked.totals.bots === 1 && checked.totals.images === 9 && checked.totals.alreadyKept === 5 && checked.totals.added === 1
+        && checked.totals.inFolder === 1 && checked.totals.missing === 1 && checked.totals.unmatched === 1 && checked.mentions[0].count === 1 && checked.missing[0].why.folderFiles === 1 && checked.missing[0].examples[0] === 'gone.png'
         && fs.statSync(path.join(root, 'bangju/archive/assets/bot1/retired.png')).ino === fs.statSync(path.join(root, 'kv/objects', retiredObject)).ino, JSON.stringify(checked.totals));
     const again = await archive.recheck();
-    ok('a second recheck finds nothing new to add', again.totals.added === 0 && again.totals.alreadyKept === 6 && again.totals.missing === 1, JSON.stringify(again.totals));
+    ok('a second recheck finds nothing new to add', again.totals.added === 0 && again.totals.alreadyKept === 6 && again.totals.missing === 1 && again.totals.unmatched === 1 && archive.unprotectedCount() === 0, JSON.stringify(again.totals));
 
     // The app drops the retired entry and deletes the object while the bot is archived.
     present.delete('assets/retired.png');

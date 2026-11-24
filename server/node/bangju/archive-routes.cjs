@@ -35,6 +35,8 @@ function registerBangjuArchiveRoutes(app, {
         dataRoot,
         resolveActiveDirectory: id => repository.characterDirectoryPath(id),
         collectAssetReferences: botAssetReferences,
+        // What the card registers as its pictures; names that only appear in its text are not in here.
+        collectDeclaredReferences: metadata => collectDatabaseAssetReferences({ characters: [metadata] }),
         collectNestedReferences: collectNestedAssetReferences,
         toStableId: chaId => stableId(chaId, 'character'),
         kv,
@@ -672,6 +674,7 @@ function registerBangjuArchiveRoutes(app, {
                 finish(200, {
                     status: 'done',
                     moved: result.moved, failed: result.failed, assets: result.assets, missing: result.missing,
+                    ...(result.mentions?.length ? { mentions: result.mentions } : {}),
                     ...(result.foldersRestored ? { foldersRestored: result.foldersRestored, intoFolders: result.intoFolders || 0 } : {}),
                     before, after, timings,
                     // 'pending': 목록 다시 읽기는 조금 뒤(또는 앱이 열릴 때) 한다.

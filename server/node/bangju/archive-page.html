@@ -422,6 +422,7 @@
         lines.push('  못 찾은 그림: ' + (item.name || item.id) + ' ' + item.count + '장 (예: ' + item.examples.slice(0, 2).join(', ') + ')' + whyText(item.why));
       }
       if ((run.missing || []).length > 5) lines.push('  … 그 밖에 봇 ' + ((run.missing || []).length - 5) + '개');
+      lines.push(...mentionLines(a.unmatched, run.mentions));
     } else {
       if (a.returned) lines.push('그림 되돌려 놓음: ' + a.returned + '장');
       if (run.foldersRestored) lines.push('앱 목록의 원래 자리로 돌려놓음: ' + run.foldersRestored + '개 (그 가운데 폴더 안으로 ' + (run.intoFolders || 0) + '개)');
@@ -558,6 +559,14 @@
       + why.folderFiles + '개 · 폴더 방식 봇 ' + (why.packaged ? '예' : '아니오');
   }
 
+  // 글이나 채팅 안에 글자로만 나오는 그림 이름. 그 이름으로 저장된 그림이 원래 없으므로 잃은 것이 아니다.
+  function mentionLines(count, mentions) {
+    if (!count) return [];
+    const lines = ['글·채팅 안에 글자로만 나오는 그림 이름 ' + count + '개: 그 이름으로 저장된 그림이 원래 없습니다(잃은 것 아님).'];
+    for (const item of (mentions || []).slice(0, 5)) lines.push('  ' + (item.name || item.id) + ' ' + item.count + '개 (예: ' + item.examples.slice(0, 2).join(', ') + ')');
+    return lines;
+  }
+
   function describeRecheck(checked) {
     const t = checked.totals;
     const lines = [
@@ -572,6 +581,7 @@
         : '  어디에도 없음: ' + (item.name || item.id) + ' ' + item.count + '장 (예: ' + item.examples.slice(0, 2).join(', ') + ')' + whyText(item.why));
     }
     if ((checked.missing || []).length > 10) lines.push('  … 그 밖에 봇 ' + (checked.missing.length - 10) + '개');
+    lines.push(...mentionLines(t.unmatched, checked.mentions));
     return lines;
   }
 

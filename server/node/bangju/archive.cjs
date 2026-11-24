@@ -61,7 +61,11 @@ function isDirectory(target) {
 // `collectNestedReferences(value)`: the same for any parsed JSON (chat files).
 // `toStableId(chaId)`: the ID the server lists a bot under.
 // `kv`: the shared asset store ({ has, set }), used to give images back on restore.
-function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetReferences, collectNestedReferences, toStableId, kv }) {
+// `collectDeclaredReferences(metadata)`: only the names the card registers as its pictures
+// (cover, emotion images, added assets ...). Names that merely appear inside text or chat
+// messages are searched for too, but when no file exists under such a name nothing is missing:
+// it was never a stored picture.
+function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetReferences, collectDeclaredReferences, collectNestedReferences, toStableId, kv }) {
     const root = path.resolve(dataRoot);
     const archiveRoot = path.join(root, ARCHIVE_DIRECTORY);
     const storeRoot = path.join(root, STORE_DIRECTORY);
@@ -135,6 +139,7 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
             }
         }
         const assets = [...references].filter(name => /^[A-Za-z0-9._-]+$/.test(name)).sort();
+        const declared = declaredNames(metadata);
         return {
             summary: {
                 directory: folderName,
@@ -146,7 +151,14 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                 ...listFacts(metadata),
             },
             assets,
+            declared,
         };
+    }
+
+    // The picture names a card registers itself (null: this caller cannot tell them apart, so every name counts).
+    function declaredNames(metadata) {
+        if (!collectDeclaredReferences) return null;
+        try { return new Set(collectDeclaredReferences(metadata)); } catch { return null; }
     }
 
     function loadIndex() {
@@ -310,7 +322,8 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
     }
 
     // `botFolder`: where the bot's own folder is now (it may hold images itself).
-    function protectAssets(id, assets, botFolder) {
+    // `declaredOf()`: the names the card registers as pictures (asked only when a name has no file).
+    function protectAssets(id, assets, botFolder, declaredOf) {
         const folder = assetLinks(id);
         let saved = 0;
         let copied = 0;
@@ -318,6 +331,9 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
         let inModule = 0;
         let viaApp = 0;
         const missing = [];
+        // Names that only appear in text or chat and have no file: never stored pictures.
+        const unmatched = [];
+        let declared;
         let own = null;
         for (const name of assets) {
             const key = `assets/${name}`;
@@ -333,7 +349,9 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
             }
             if (!source) {
                 fs.mkdirSync(folder, { recursive: true });
-                if (copyThroughApp(key, target)) { saved += 1; copied += 1; viaApp += 1; }
+                if (copyThroughApp(key, target)) { saved += 1; copied += 1; viaApp += 1; continue; }
+                if (declared === undefined) declared = declaredOf ? declaredOf() : null;
+                if (declared && !declared.has(name)) unmatched.push(name);
                 else missing.push(name);
                 continue;
             }
@@ -349,7 +367,7 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
         }
         // An empty folder would read as "this bot's images are kept".
         if (!saved) { try { fs.rmdirSync(folder); } catch { /* holds names from before, or was never made */ } }
-        return { protected: saved, missing, copied, inFolder, inModule, viaApp, ...(missing.length ? { why: describeMissing(missing, botFolder) } : {}) };
+        return { protected: saved, missing, unmatched, copied, inFolder, inModule, viaApp, ...(missing.length ? { why: describeMissing(missing, botFolder) } : {}) };
     }
 
     // Gives back any image the app's cleanup removed while the bot was archived.
@@ -472,7 +490,7 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                 failed.push({ id, error: String(error?.message || error) });
             }
         }
-        if (!plan.length) return { moved: [], failed, restoredSidebar: [], restoredOrder: [], assets: { protected: 0, missing: 0, copied: 0, inFolder: 0, inModule: 0, viaApp: 0, returned: 0 }, missing: [] };
+        if (!plan.length) return { moved: [], failed, restoredSidebar: [], restoredOrder: [], assets: { protected: 0, missing: 0, unmatched: 0, copied: 0, inFolder: 0, inModule: 0, viaApp: 0, returned: 0 }, missing: [], mentions: [] };
 
         fs.mkdirSync(archivedCharacters, { recursive: true });
         fs.mkdirSync(activeCharacters, { recursive: true });
@@ -483,10 +501,11 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
         dropAssetLookup();
         const moved = [];
         const restoredSidebar = [];
-        const assetTotals = { protected: 0, missing: 0, copied: 0, inFolder: 0, inModule: 0, viaApp: 0, returned: 0 };
+        const assetTotals = { protected: 0, missing: 0, unmatched: 0, copied: 0, inFolder: 0, inModule: 0, viaApp: 0, returned: 0 };
         const restoredOrder = [];
         // Images that could not be found anywhere, by bot (kept short for the report).
         const missingReport = [];
+        const mentions = [];
         const characters = index.characters.slice();
         const saveIndex = () => atomicWriteJson(indexPath, { schemaVersion: 1, updatedAt: Date.now(), characters });
         let step = 0;
@@ -501,9 +520,13 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                     listed = sidebarOf ? sidebarOf(entry.id) : null;
                     // Before the folder moves: an interruption leaves only spare names behind.
                     shownName = details.summary.name || entry.folderName;
-                    const kept = protectAssets(entry.id, details.assets, entry.from);
+                    const kept = protectAssets(entry.id, details.assets, entry.from, () => details.declared);
+                    details.protected = kept.protected;
+                    details.unmatched = kept.unmatched;
                     assetTotals.protected += kept.protected;
                     assetTotals.missing += kept.missing.length;
+                    assetTotals.unmatched += kept.unmatched.length;
+                    if (kept.unmatched.length && mentions.length < 50) mentions.push({ id: entry.id, name: shownName, count: kept.unmatched.length, examples: kept.unmatched.slice(0, 3) });
                     assetTotals.copied += kept.copied;
                     assetTotals.inFolder += kept.inFolder;
                     assetTotals.inModule += kept.inModule;
@@ -519,12 +542,14 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                 if (direction === 'archive') {
                     characters.push({
                         id: entry.id, ...details.summary, archivedAt: Date.now(),
+                        protectedAssets: details.protected,
                         ...(details.missing ? { missingAssets: details.missing.length } : {}),
                         ...(details.order ? { order: details.order } : {}),
                         ...(listed ? { position: listed.position, sidebar: listed.entry } : {}),
                     });
                     atomicWriteJson(path.join(referencesRoot, `${entry.id}.json`), {
                         schemaVersion: 1, assets: details.assets, ...(details.missing ? { missing: details.missing } : {}),
+                        ...(details.unmatched.length ? { unmatched: details.unmatched } : {}),
                     });
                 } else {
                     const at = characters.findIndex(item => item.id === entry.id);
@@ -551,7 +576,8 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
         saveIndex();
         fs.rmSync(journalPath, { force: true });
         dropAssetLookup();
-        return { moved, failed, restoredSidebar, restoredOrder, assets: assetTotals, missing: missingReport };
+        mentions.sort((a, b) => b.count - a.count);
+        return { moved, failed, restoredSidebar, restoredOrder, assets: assetTotals, missing: missingReport, mentions };
     }
 
     // Looks again for the images of archived bots that have no archive name yet:
@@ -559,8 +585,10 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
     // adds names; nothing is moved or removed.
     async function recheck({ onProgress, pause, orderOf } = {}) {
         const index = reconcileIndex();
-        const totals = { bots: index.characters.length, images: 0, alreadyKept: 0, added: 0, copied: 0, inFolder: 0, inModule: 0, viaApp: 0, missing: 0, listFilled: 0, listsRebuilt: 0, foldersFound: 0 };
+        const totals = { bots: index.characters.length, images: 0, alreadyKept: 0, added: 0, copied: 0, inFolder: 0, inModule: 0, viaApp: 0, missing: 0, unmatched: 0, listFilled: 0, listsRebuilt: 0, foldersFound: 0 };
         const report = [];
+        // Bots whose text or chats name pictures that were never stored (shown apart from missing ones).
+        const mentions = [];
         let changed = false;
         let step = 0;
         dropAssetLookup();
@@ -580,7 +608,8 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                     changed = true;
                 }
                 const referencesPath = path.join(referencesRoot, `${entry.id}.json`);
-                let assets = readJson(referencesPath)?.assets;
+                const stored = readJson(referencesPath);
+                let assets = stored?.assets;
                 if (!Array.isArray(assets)) {
                     // The bot's image list is gone (for example after a backup was restored): read it again from the bot's files.
                     assets = summarize(path.join(archivedCharacters, entry.directory), entry.directory).assets;
@@ -594,24 +623,36 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                 const waiting = names.filter(name => !kept.has(name));
                 totals.images += names.length;
                 totals.alreadyKept += names.length - waiting.length;
+                let keptNow = names.length - waiting.length;
                 if (waiting.length) {
-                    const found = protectAssets(entry.id, waiting, path.join(archivedCharacters, entry.directory));
+                    const botFolder = path.join(archivedCharacters, entry.directory);
+                    const found = protectAssets(entry.id, waiting, botFolder,
+                        () => declaredNames(JSON.parse(fs.readFileSync(path.join(botFolder, 'metadata.json'), 'utf8'))));
+                    keptNow += found.protected;
+                    totals.unmatched += found.unmatched.length;
+                    if (found.unmatched.length && mentions.length < 50) mentions.push({ id: entry.id, name: entry.name || entry.directory, count: found.unmatched.length, examples: found.unmatched.slice(0, 3) });
                     totals.added += found.protected;
                     totals.copied += found.copied;
                     totals.inFolder += found.inFolder;
                     totals.inModule += found.inModule;
                     totals.viaApp += found.viaApp;
                     totals.missing += found.missing.length;
-                    if ((entry.missingAssets || 0) !== found.missing.length || found.protected) {
+                    if ((entry.missingAssets || 0) !== found.missing.length || found.protected
+                        || (Array.isArray(stored?.unmatched) ? stored.unmatched.length : 0) !== found.unmatched.length) {
                         if (found.missing.length) entry.missingAssets = found.missing.length;
                         else delete entry.missingAssets;
-                        atomicWriteJson(referencesPath, { schemaVersion: 1, assets: names, ...(found.missing.length ? { missing: found.missing } : {}) });
+                        atomicWriteJson(referencesPath, {
+                            schemaVersion: 1, assets: names, ...(found.missing.length ? { missing: found.missing } : {}),
+                            ...(found.unmatched.length ? { unmatched: found.unmatched } : {}),
+                        });
                         changed = true;
                     }
                     if (found.missing.length && report.length < 200) {
                         report.push({ id: entry.id, name: entry.name || entry.directory, count: found.missing.length, examples: found.missing.slice(0, 5), why: found.why });
                     }
                 }
+                // How many of its pictures have an archive name (tells a bot that needs "다시 확인" from one that has none to keep).
+                if (entry.protectedAssets !== keptNow) { entry.protectedAssets = keptNow; changed = true; }
             } catch (error) {
                 if (report.length < 200) report.push({ id: entry.id, name: entry.name || entry.directory, error: String(error?.message || error) });
             }
@@ -620,7 +661,8 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
         }
         if (changed) atomicWriteJson(indexPath, { schemaVersion: 1, updatedAt: Date.now(), characters: index.characters });
         dropAssetLookup();
-        return { totals, missing: report };
+        mentions.sort((a, b) => b.count - a.count);
+        return { totals, missing: report, mentions };
     }
 
     // Archived bots that use images but have no archive names for them yet (for
@@ -628,7 +670,9 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
     function unprotectedCount(entries = reconcileIndex().characters) {
         let count = 0;
         for (const entry of entries) {
-            if ((entry.assetCount || 0) > (entry.missingAssets || 0) && !fs.existsSync(assetLinks(entry.id))) count += 1;
+            // Entries written before `protectedAssets` existed: every picture that was found is assumed to have a name.
+            const expected = entry.protectedAssets !== undefined ? entry.protectedAssets : (entry.assetCount || 0) - (entry.missingAssets || 0);
+            if (expected > 0 && !fs.existsSync(assetLinks(entry.id))) count += 1;
         }
         return count;
     }

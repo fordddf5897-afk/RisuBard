@@ -72,6 +72,20 @@ const order = () => JSON.parse(fs.readFileSync(path.join(root, 'settings/app.jso
     ok('recheck finds the folder of an older archive entry', checked.json.totals.foldersFound === 1 && list3.archived[0].folderId === 'folder-1', JSON.stringify(checked.json.totals));
     await tab.post('/api/bangju/archive/move', { ids: [idOf('Bot 0003')], direction: 'restore' });
 
+    // a picture name that only appears in a card's text (no picture was ever stored under it) is not a lost picture
+    tab = await client(base).login(); read = await tab.readDb();
+    const at = read.db.characters.findIndex(c => c.chaId === b5);
+    const written = await tab.patchDb([{ op: 'replace', path: `/characters/${at}/firstMessage`, value: 'look: <img src="assets/only-in-text.png"> and (assets/another-name.webp)' }], serverHash(read.db));
+    const a5 = await tab.post('/api/bangju/archive/move', { ids: [idOf('Bot 0005')], direction: 'archive' });
+    tab = await client(base).login();
+    const list4 = (await tab.get('/api/bangju/archive')).json;
+    const again5 = await tab.post('/api/bangju/archive/recheck', {});
+    ok('names that only appear in a card\'s text are reported apart, not as lost pictures', written.status === 200 && a5.json.moved.length === 1
+        && a5.json.assets.unmatched === 2 && a5.json.assets.missing === 0 && a5.json.mentions[0].count === 2
+        && list4.archived.find(c => c.name === 'Bot 0005').missingAssets === undefined && list4.totals.unprotectedBots === 0
+        && again5.json.totals.unmatched === 2 && again5.json.totals.missing === 0, JSON.stringify({ archive: a5.json.assets, recheck: again5.json.totals }).slice(0, 300));
+    await tab.post('/api/bangju/archive/move', { ids: [idOf('Bot 0005')], direction: 'restore' });
+
     // the server was just started and the app has not been opened: tags and covers of the bots in use are read in the background
     stop(); start();
     tab = await client(base).login();
