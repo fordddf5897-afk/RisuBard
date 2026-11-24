@@ -11,7 +11,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { createBangjuArchive } = require('./archive.cjs');
+const { createBangjuArchive, STORE_DIRECTORY } = require('./archive.cjs');
 const { stableId } = require('../user-data-repository.cjs');
 const { collectDatabaseAssetReferences, collectNestedAssetReferences } = require('../orphan-cleanup.cjs');
 const { atomicWriteJson } = require('../file-store.cjs');
@@ -93,30 +93,90 @@ function registerBangjuArchiveRoutes(app, {
         return { folders, where };
     }
 
-    // Puts restored bots back into the folders they were in. Runs before the server reloads.
+    // The app's whole list order as it was when a batch was archived (ids only), kept beside the
+    // archive so it is backed up with it. A restore reads it to find a bot's old neighbours.
+    const ORDERS = `${STORE_DIRECTORY}/orders`;
+    function saveOrderSnapshot(settings) {
+        const order = Array.isArray(settings?.characterOrder) ? settings.characterOrder : [];
+        const slim = [];
+        for (const item of order) {
+            if (typeof item === 'string') slim.push(item);
+            else if (item && typeof item === 'object' && Array.isArray(item.data)) {
+                slim.push({ id: String(item.id ?? ''), name: String(item.name ?? ''), data: item.data.filter(chaId => typeof chaId === 'string') });
+            }
+        }
+        if (!slim.length) return '';
+        const name = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        atomicWriteJson(dataRoot, `${ORDERS}/${name}.json`, { schemaVersion: 1, takenAt: Date.now(), order: slim });
+        return name;
+    }
+    function loadOrderSnapshot(name) {
+        if (typeof name !== 'string' || !/^[a-z0-9-]+$/.test(name)) return null;
+        try {
+            const order = JSON.parse(fs.readFileSync(path.join(dataRoot, ORDERS, `${name}.json`), 'utf8'))?.order;
+            return Array.isArray(order) ? order : null;
+        } catch { return null; }
+    }
+    // Snapshots no archived bot points to any more.
+    function pruneOrderSnapshots() {
+        try {
+            const used = new Set(archive.listArchived().map(entry => entry.order?.snapshot).filter(Boolean));
+            const directory = path.join(dataRoot, ORDERS);
+            for (const file of fs.readdirSync(directory)) {
+                if (!used.has(file.replace(/\.json(\.sha256)?$/, ''))) fs.rmSync(path.join(directory, file), { force: true });
+            }
+        } catch { /* none kept yet */ }
+    }
+
+    // Puts restored bots back where they were: the same folder (or the list outside folders) and
+    // the same place in it. Runs before the server reloads.
+    // The place is found from the bot's old neighbours: right after the nearest earlier one that
+    // is there now, else right before the nearest later one. So the old order comes back whether
+    // the bots are restored together, in parts, or in any order.
     function restoreFolders(entries) {
         const settings = readSettings();
-        if (!settings || !Array.isArray(settings.characterOrder)) return 0;
+        if (!settings || !Array.isArray(settings.characterOrder)) return { placed: 0, intoFolders: 0 };
         const { where } = folderMap(settings);
+        const snapshots = new Map();
+        const snapshotOf = name => {
+            if (!snapshots.has(name)) snapshots.set(name, loadOrderSnapshot(name));
+            return snapshots.get(name);
+        };
+        const topKey = item => (typeof item === 'string' ? `c:${item}` : `f:${String(item?.id ?? '')}`);
+        const isFolder = (item, id) => item && typeof item === 'object' && String(item.id ?? '') === id && Array.isArray(item.data);
+        const spot = (key, before, now, fallback) => {
+            const at = before ? before.indexOf(key) : -1;
+            if (at >= 0) {
+                const present = new Set(now);
+                for (let earlier = at - 1; earlier >= 0; earlier--) if (present.has(before[earlier])) return now.lastIndexOf(before[earlier]) + 1;
+                for (let later = at + 1; later < before.length; later++) if (present.has(before[later])) return now.indexOf(before[later]);
+            }
+            return Math.min(Math.max(fallback | 0, 0), now.length);
+        };
         let placed = 0;
-        // Lowest place first, so several bots of one folder come back in their old order.
+        let intoFolders = 0;
+        // Lowest old place first: a bot's earlier neighbours are then usually in before it.
         const sorted = entries.filter(entry => entry?.order).sort((a, b) => (a.order.index | 0) - (b.order.index | 0));
         for (const { chaId, order } of sorted) {
             // Still listed (the app was not opened in between): it never left its place.
-            if (typeof chaId !== 'string' || !order || where.has(chaId)) continue;
+            if (typeof chaId !== 'string' || where.has(chaId)) continue;
+            const old = order.snapshot ? snapshotOf(order.snapshot) : null;
             if (order.folderId) {
-                const folder = settings.characterOrder.find(item => item && typeof item === 'object' && String(item.id ?? '') === order.folderId && Array.isArray(item.data));
+                const folder = settings.characterOrder.find(item => isFolder(item, order.folderId));
                 // The folder was deleted meanwhile: the app lists the bot outside folders.
                 if (!folder) continue;
-                folder.data.splice(Math.min(Math.max(order.index | 0, 0), folder.data.length), 0, chaId);
+                const before = old?.find(item => isFolder(item, order.folderId))?.data || null;
+                folder.data.splice(spot(chaId, before, folder.data, order.index), 0, chaId);
+                intoFolders += 1;
             } else {
-                settings.characterOrder.splice(Math.min(Math.max(order.index | 0, 0), settings.characterOrder.length), 0, chaId);
+                const before = old ? old.map(topKey) : null;
+                settings.characterOrder.splice(spot(`c:${chaId}`, before, settings.characterOrder.map(topKey), order.index), 0, chaId);
             }
             where.set(chaId, order);
             placed += 1;
         }
         if (placed) atomicWriteJson(dataRoot, SETTINGS_FILE, settings);
-        return placed;
+        return { placed, intoFolders };
     }
 
     // --- 쓰는 봇의 태그와 표지 ---
@@ -299,18 +359,32 @@ function registerBangjuArchiveRoutes(app, {
     async function moveFolders(ids, direction, onProgress) {
         const listed = repository.loadSidebarIndex().characters || [];
         const positions = new Map(listed.map((character, position) => [character.id, position]));
-        const placement = direction === 'archive' ? folderMap() : null;
+        let placement = null;
+        let snapshot = '';
+        if (direction === 'archive') {
+            const settings = currentSettings();
+            placement = folderMap(settings);
+            try { snapshot = saveOrderSnapshot(settings); }
+            catch (error) { logger?.warn?.('[Bangju archive] Could not keep the list order of this batch', error); }
+        }
         const result = await archive.move({
             ids, direction, onProgress,
             sidebarOf: id => (positions.has(id) ? { position: positions.get(id), entry: listed[positions.get(id)] } : null),
-            orderOf: chaId => placement?.where.get(chaId) || null,
+            orderOf: chaId => {
+                const place = placement?.where.get(chaId);
+                return place ? { ...place, ...(snapshot ? { snapshot } : {}) } : null;
+            },
             pause: () => new Promise(resolve => setImmediate(resolve)),
         });
         if (direction === 'restore' && result.restoredSidebar.length) restoreListOrder(result.restoredSidebar);
         if (direction === 'restore' && result.restoredOrder.length) {
-            try { result.foldersRestored = restoreFolders(result.restoredOrder); }
-            catch (error) { logger?.warn?.('[Bangju archive] Could not put restored bots back into their folders', error); }
+            try {
+                const put = restoreFolders(result.restoredOrder);
+                result.foldersRestored = put.placed;
+                result.intoFolders = put.intoFolders;
+            } catch (error) { logger?.warn?.('[Bangju archive] Could not put restored bots back into their folders', error); }
         }
+        pruneOrderSnapshots();
         return result;
     }
 
@@ -598,7 +672,7 @@ function registerBangjuArchiveRoutes(app, {
                 finish(200, {
                     status: 'done',
                     moved: result.moved, failed: result.failed, assets: result.assets, missing: result.missing,
-                    ...(result.foldersRestored ? { foldersRestored: result.foldersRestored } : {}),
+                    ...(result.foldersRestored ? { foldersRestored: result.foldersRestored, intoFolders: result.intoFolders || 0 } : {}),
                     before, after, timings,
                     // 'pending': 목록 다시 읽기는 조금 뒤(또는 앱이 열릴 때) 한다.
                     settle: settled ? settled.status : (result.moved.length ? 'pending' : 'nothing'),

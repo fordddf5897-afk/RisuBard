@@ -424,7 +424,7 @@
       if ((run.missing || []).length > 5) lines.push('  … 그 밖에 봇 ' + ((run.missing || []).length - 5) + '개');
     } else {
       if (a.returned) lines.push('그림 되돌려 놓음: ' + a.returned + '장');
-      if (run.foldersRestored) lines.push('원래 있던 폴더로 돌려놓음: ' + run.foldersRestored + '개');
+      if (run.foldersRestored) lines.push('앱 목록의 원래 자리로 돌려놓음: ' + run.foldersRestored + '개 (그 가운데 폴더 안으로 ' + (run.intoFolders || 0) + '개)');
     }
     if (run.failed.length) lines.push('실패한 것: ' + JSON.stringify(run.failed.slice(0, 10)));
     if (run.settle === 'pending') lines.push('목록 정리는 서버가 뒤에서 합니다. 앱을 열어도 됩니다.');

@@ -42,6 +42,7 @@ done
 start BANGJU_ARCHIVE_SETTLE=now && seeded && check "t4 중단 복구와 이어서 하기" env BANGJU_ARCHIVE_SETTLE=now node t4.cjs "$BASE" "$ROOT" $PORT "$LOG"; finish
 start BANGJU_ARCHIVE_SETTLE=now && seeded && check "t14 폴더 기억, 앱을 안 연 상태의 태그·표지" env BANGJU_ARCHIVE_SETTLE=now node t14.cjs "$BASE" "$ROOT" $PORT "$LOG"; finish
 start BANGJU_ARCHIVE_SETTLE_DELAY_MS=1500 && seeded && check "t14 폴더 기억(기본 방식: 나중에 정리)" env BANGJU_ARCHIVE_SETTLE_DELAY_MS=1500 node t14.cjs "$BASE" "$ROOT" $PORT "$LOG"; finish
+start BANGJU_ARCHIVE_SETTLE=now && node seed2.cjs "$BASE" 240 > /dev/null && check "t15 폴더 기억을 많은 수로(봇 240개, 폴더 10개)" env BANGJU_ARCHIVE_SETTLE=now node t15.cjs "$BASE"; finish
 start BANGJU_ARCHIVE_SETTLE=now BANGJU_ARCHIVE_TEST_FAIL_RELOAD=1 && seeded && check "t7 정리 실패 때 되돌리기(바로 정리)" node t7.cjs "$BASE" "$ROOT"; finish
 start BANGJU_ARCHIVE_SETTLE_DELAY_MS=2000 && seeded && check "t9 기본 방식(나중에 정리)" node t9.cjs "$BASE" "$ROOT"; finish
 start BANGJU_ARCHIVE_SETTLE_DELAY_MS=1500 BANGJU_ARCHIVE_TEST_FAIL_RELOAD=1 && seeded && check "t9 정리 실패 때 되돌리기(기본 방식)" node t9.cjs "$BASE" "$ROOT" rollback; finish

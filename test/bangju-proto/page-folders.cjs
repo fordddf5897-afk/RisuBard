@@ -78,7 +78,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await page.click('#moveButton');
     await page.waitForFunction(() => /불러오기 1개 완료/.test(document.getElementById('result').innerText), { timeout: 30000 });
     const result = await page.$eval('#result', element => element.innerText);
-    ok('restoring what the folder filter shows puts it back into that folder', /원래 있던 폴더로 돌려놓음: 1개/.test(result), result.replace(/\n/g, ' / ').slice(0, 200));
+    ok('restoring what the folder filter shows puts it back into that folder', /원래 자리로 돌려놓음: 1개 \(그 가운데 폴더 안으로 1개\)/.test(result), result.replace(/\n/g, ' / ').slice(0, 200));
     const after = await (await client(base).login()).readDb();
     const folder = after.db.characterOrder.find(item => item && item.id === 'folder-2');
     ok('the app sees the bot in its folder again, at its old place', folder && folder.data.join() === second.join(), JSON.stringify(folder && folder.data.length));
