@@ -422,7 +422,7 @@
         lines.push('  못 찾은 그림: ' + (item.name || item.id) + ' ' + item.count + '장 (예: ' + item.examples.slice(0, 2).join(', ') + ')' + whyText(item.why));
       }
       if ((run.missing || []).length > 5) lines.push('  … 그 밖에 봇 ' + ((run.missing || []).length - 5) + '개');
-      lines.push(...mentionLines(a.unmatched, run.mentions));
+      lines.push(...mentionLines(a.unmatched, run.mentions, true));
     } else {
       if (a.returned) lines.push('그림 되돌려 놓음: ' + a.returned + '장');
       if (run.foldersRestored) lines.push('앱 목록의 원래 자리로 돌려놓음: ' + run.foldersRestored + '개 (그 가운데 폴더 안으로 ' + (run.intoFolders || 0) + '개)');
@@ -559,10 +559,12 @@
       + why.folderFiles + '개 · 폴더 방식 봇 ' + (why.packaged ? '예' : '아니오');
   }
 
-  // 글이나 채팅 안에 글자로만 나오는 그림 이름. 그 이름으로 저장된 그림이 원래 없으므로 잃은 것이 아니다.
-  function mentionLines(count, mentions) {
+  // 글이나 채팅 안에만 나오는 그림 이름(카드가 그림으로 등록한 것이 아님) 가운데 그 이름으로 저장된 그림이 없는 것.
+  // 보관할 때는 앱이 읽을 수 있는 그림이면 모두 이름표를 받으므로, 그때 남는 것은 앱도 읽지 못하는 이름이다.
+  function mentionLines(count, mentions, atArchive) {
     if (!count) return [];
-    const lines = ['글·채팅 안에 글자로만 나오는 그림 이름 ' + count + '개: 그 이름으로 저장된 그림이 원래 없습니다(잃은 것 아님).'];
+    const lines = ['카드에 등록된 그림이 아닌 이름 ' + count + '개(글·채팅 안에만 나옴): '
+      + (atArchive ? '보관하는 지금 앱도 그 이름의 그림을 읽지 못합니다. 보관함이 잃은 것이 아닙니다.' : '지금 그 이름으로 저장된 그림이 없습니다.')];
     for (const item of (mentions || []).slice(0, 5)) lines.push('  ' + (item.name || item.id) + ' ' + item.count + '개 (예: ' + item.examples.slice(0, 2).join(', ') + ')');
     return lines;
   }
@@ -582,7 +584,7 @@
         : '  어디에도 없음: ' + (item.name || item.id) + ' ' + item.count + '장 (예: ' + item.examples.slice(0, 2).join(', ') + ')' + whyText(item.why));
     }
     if ((checked.missing || []).length > 10) lines.push('  … 그 밖에 봇 ' + (checked.missing.length - 10) + '개');
-    lines.push(...mentionLines(t.unmatched, checked.mentions));
+    lines.push(...mentionLines(t.unmatched, checked.mentions, false));
     return lines;
   }
 
@@ -617,7 +619,9 @@
     render();
   });
   fetch('/api/bangju/version').then(response => response.json()).then(info => {
-    $('version').textContent = '버전 ' + info.commit + (info.builtAt ? ' · ' + new Date(info.builtAt).toLocaleString('ko-KR') : '');
+    // 시험용 설치본은 '버전'(커밋)이 있고, 본 설치본은 '코드' 표시만 있다. 코드가 같으면 '코드' 값이 같다.
+    $('version').textContent = (info.commit ? '버전 ' + info.commit + ' · ' : '') + '코드 ' + (info.code || '?')
+      + (info.builtAt ? ' · ' + new Date(info.builtAt).toLocaleString('ko-KR') : '');
   }).catch(() => {});
   $('moveButton').addEventListener('click', () => move([...picked], tab === 'active' ? 'archive' : 'restore'));
   $('keepOnlyButton').addEventListener('click', () => {

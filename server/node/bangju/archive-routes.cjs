@@ -11,6 +11,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { createBangjuArchive, STORE_DIRECTORY } = require('./archive.cjs');
 const { stableId } = require('../user-data-repository.cjs');
 const { collectDatabaseAssetReferences, collectNestedAssetReferences } = require('../orphan-cleanup.cjs');
@@ -305,11 +306,18 @@ function registerBangjuArchiveRoutes(app, {
     }
 
     // 어느 설치본이 돌고 있는지 알려 준다(로그인 불필요). build-info.json은 시험용
-    // 설치본을 만들 때 워크플로가 넣는다.
+    // 설치본을 만들 때 워크플로가 넣는다. 본 설치본에는 그 파일이 없으므로, 보관함 코드
+    // 세 파일의 내용으로 만든 표시(code)를 같이 준다. 코드가 같으면 어느 설치본이든 값이 같다.
+    let codeMark = '';
+    try {
+        const mark = crypto.createHash('sha256');
+        for (const name of ['archive.cjs', 'archive-routes.cjs', 'archive-page.html']) mark.update(fs.readFileSync(path.join(__dirname, name)));
+        codeMark = mark.digest('hex').slice(0, 7);
+    } catch { /* shown without it */ }
     app.get('/api/bangju/version', (req, res) => {
-        let build = { commit: 'dev', builtAt: null };
-        try { build = JSON.parse(fs.readFileSync(path.join(__dirname, 'build-info.json'), 'utf8')); } catch { /* local run */ }
-        res.set('Cache-Control', 'no-store').json({ feature: 'bangju-archive', ...build });
+        let build = { commit: '', builtAt: null };
+        try { build = JSON.parse(fs.readFileSync(path.join(__dirname, 'build-info.json'), 'utf8')); } catch { /* not a test build */ }
+        res.set('Cache-Control', 'no-store').json({ feature: 'bangju-archive', ...build, code: codeMark });
     });
 
     // 보관함 화면. 본 화면(SPA)과 따로 열리며, 본 화면이 안 열려도 쓸 수 있다.
