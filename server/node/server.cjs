@@ -4654,6 +4654,23 @@ require('./character-package-routes.cjs').registerCharacterPackageRoutes(app, {
     },
 });
 
+// bangju: 보관함(B1). 코드는 server/node/bangju/에 있다.
+const bangjuArchive = require('./bangju/archive-routes.cjs').registerBangjuArchiveRoutes(app, {
+    auth: checkAuth,
+    queue: queueStorageOperation,
+    repository: userDataRepository,
+    dataRoot: savePath,
+    isBlocked: () => externalEditSession.isActive() || !canonicalProjectionReady || risuAccountImport.isBlocking(),
+    flush: () => flushPendingDbWithinQueue({ materialize: false }),
+    hasExternalChanges: () => canonicalProjectionSync.hasExternalChanges(),
+    adopt: () => adoptSettledExternalProjection(),
+    revokeSessions: () => sessionLock.revokeAll(),
+    databaseBytes: () => kvSize(DB_BLOB_KEY) || 0,
+    kv: { has: key => kvGetUpdatedAt(key) !== null, set: kvSet, get: kvGet },
+    activeDatabase: () => dbCache[DB_HEX_KEY],
+    logger,
+});
+
 require('./asset-store-routes.cjs').registerAssetStoreRoutes(app, {
     auth: checkAuth,
     activeSession: checkActiveSession,
@@ -6833,6 +6850,7 @@ app.get('/api/db/stats', async (req, res, next) => {
         }
         if (stripped) {
             const uncleanable = buildUncleanableSet(stripped);
+            for (const name of bangjuArchive.referencedAssetsOrEmpty()) uncleanable.add(name); // bangju
             for (const it of kvListWithSizes('assets/')) {
                 if (!uncleanable.has(statsBasename(it.key))) {
                     orphan.count++;
@@ -6957,6 +6975,7 @@ app.get('/api/db/stats/characters', async (req, res, next) => {
         }
 
         const uncleanable = buildUncleanableSet(dbObj);
+        for (const name of bangjuArchive.referencedAssetsOrEmpty()) uncleanable.add(name); // bangju
         let orphanCount = 0, orphanTotal = 0;
         for (const it of kvListWithSizes('assets/')) {
             if (!uncleanable.has(statsBasename(it.key))) {
@@ -7114,6 +7133,7 @@ app.post('/api/db/orphans/cleanup', async (req, res, next) => {
             const referencedAssets = collectDatabaseAssetReferences(database);
             collectNestedAssetReferences(database, referencedAssets);
             collectNestedAssetReferences(fullChatStore, referencedAssets);
+            for (const name of bangjuArchive.referencedAssets()) referencedAssets.add(name); // bangju: 보관된 봇의 그림은 남긴다
             for (const key of kvList('cache/plugin-storage/')) {
                 if (!key.endsWith('.json')) continue;
                 const value = kvGet(key);

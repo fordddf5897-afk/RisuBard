@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>방주 보관함</title>
+<style>
+  :root { color-scheme: light dark; --line: #8883; --soft: #8881; --accent: #3d6fe0; --muted: #808590; --danger: #c0392b; }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.5 system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; margin: 0 auto; padding: 12px 12px 96px; max-width: 780px; }
+  header { display: flex; align-items: baseline; gap: 10px; margin: 2px 0 10px; }
+  h1 { font-size: 19px; margin: 0; flex: 1; }
+  header a { color: var(--accent); text-decoration: none; font-size: 14px; }
+  .note { color: var(--muted); font-size: 13px; margin: 0; }
+  .box { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 10px 0; }
+  .totals b { font-size: 17px; }
+  .meter { height: 6px; border-radius: 3px; background: var(--line); margin: 7px 0 3px; overflow: hidden; }
+  .meter i { display: block; height: 100%; background: var(--accent); }
+  .meter i.high { background: var(--danger); }
+  .warn { color: var(--danger); font-weight: 600; font-size: 13px; }
+  .tabs { display: flex; gap: 6px; margin-top: 12px; }
+  .tabs button { flex: 1; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: inherit; font: inherit; }
+  .tabs button[aria-selected=true] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .bar { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 6px; align-items: center; }
+  .bar input[type=search] { flex: 1 1 160px; min-width: 0; }
+  input, select, button { font: inherit; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line); background: transparent; color: inherit; }
+  input[type=checkbox] { width: 18px; height: 18px; padding: 0; flex: none; accent-color: var(--accent); }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .45; cursor: default; }
+  label.toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
+  .list { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--soft); cursor: pointer; }
+  .row:last-child { border-bottom: 0; }
+  .row.picked { background: var(--soft); }
+  .cover { width: 40px; height: 40px; border-radius: 9px; flex: none; background: var(--soft) center/cover no-repeat; display: grid; place-items: center; color: var(--muted); font-weight: 600; overflow: hidden; }
+  .list.plain .cover { display: none; }
+  .main { flex: 1; min-width: 0; }
+  .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tags { display: flex; gap: 4px; overflow: hidden; margin-top: 2px; }
+  .tags span { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 0 5px; white-space: nowrap; }
+  .tags span.in-folder { border-color: transparent; background: var(--soft); }
+  .group { padding: 7px 12px; font-size: 13px; font-weight: 600; color: var(--muted); background: var(--soft); border-bottom: 1px solid var(--soft); }
+  .side { text-align: right; font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; flex: none; }
+  .side b { display: block; font-size: 13px; color: inherit; font-weight: 600; }
+  .more { padding: 10px; text-align: center; color: var(--muted); font-size: 13px; }
+  .empty { padding: 28px 12px; text-align: center; color: var(--muted); }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; align-items: center; }
+  .dock { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); background: Canvas; border-top: 1px solid var(--line); }
+  .dock .inner { max-width: 756px; margin: 0 auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .dock .picked-note { flex: 1 1 100%; font-size: 13px; color: var(--muted); }
+  .dock button { flex: 1 1 0; white-space: nowrap; }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 13px; margin: 0; font-family: inherit; }
+  details summary { cursor: pointer; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>방주 보관함</h1>
+  <a href="/">앱 열기</a>
+</header>
+<p class="note">안 쓰는 봇을 보관함으로 옮기면 앱이 가벼워집니다. 채팅과 그림은 같이 보관되고, 불러오면 그대로 돌아옵니다. <span id="version"></span></p>
+
+<div id="login" class="box">
+  <label>리스버드 비밀번호 (평소 앱을 열 때 넣는 것) <input id="password" type="password" autocomplete="current-password"></label>
+  <button id="loginButton" class="primary">들어가기</button>
+  <span id="loginError" class="note"></span>
+</div>
+
+<div id="main" class="hidden">
+  <div class="box totals" id="totals"></div>
+  <div class="box hidden" id="interrupted">
+    <pre id="interruptedText"></pre>
+    <div class="actions"><button id="resumeButton" class="primary">이어서 하기</button><button id="dismissButton">그만두기</button></div>
+  </div>
+  <div class="tabs" role="tablist">
+    <button id="tabActive" role="tab" aria-selected="true">쓰는 것</button>
+    <button id="tabArchived" role="tab" aria-selected="false">보관함</button>
+  </div>
+  <div class="bar">
+    <input id="search" type="search" placeholder="이름이나 태그로 찾기">
+    <select id="folder" aria-label="폴더"><option value="*">모든 폴더</option></select>
+    <select id="sort" aria-label="정렬">
+      <option value="size">용량 큰 순</option>
+      <option value="idle">오래 안 쓴 순</option>
+      <option value="recent">최근 대화순</option>
+      <option value="name">이름순</option>
+      <option value="folder">폴더별로 묶기</option>
+    </select>
+    <label class="toggle"><input id="showCovers" type="checkbox"> 표지 보기</label>
+  </div>
+  <div class="actions">
+    <button id="selectAll">찾은 것 모두 고르기</button>
+    <button id="selectNone">고르기 풀기</button>
+    <span class="note">위에서 <input id="topCount" type="number" min="1" value="100" style="width:5em"> 개</span>
+    <button id="selectTop">고르기</button>
+  </div>
+  <div class="list plain" id="list"></div>
+  <div class="box"><pre id="result">아직 옮긴 것이 없습니다.</pre></div>
+  <details class="box">
+    <summary>보관된 봇 다시 확인</summary>
+    <p class="note">보관함에 있는 봇의 그림 가운데 보호 이름표가 없는 것을 다시 찾아보고, 목록에 태그와 표지 정보가 빠진 봇을 채웁니다. 이름표와 목록 정보를 더할 뿐이고 아무것도 옮기거나 지우지 않습니다. 봇이 많으면 1~2분 걸립니다.</p>
+    <button id="recheckButton">다시 확인하기</button>
+    <pre id="recheckResult"></pre>
+  </details>
+  <div class="dock">
+    <div class="inner">
+      <span id="selected" class="picked-note"></span>
+      <button id="keepOnlyButton">고른 것만 남기기</button>
+      <button id="moveButton" class="primary"></button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const mb = bytes => (bytes / 1048576).toFixed(bytes < 10485760 ? 2 : 1) + 'MB';
+  let token = null, data = null, tab = 'active', picked = new Set(), busy = false;
+
+  // 서버의 로그인표는 5분짜리다. 앱처럼 만료된 표로 새 표를 받아 온다.
+  async function renewToken() {
+    if (!token) return false;
+    try {
+      const response = await fetch('/api/token/refresh', { method: 'POST', headers: { 'risu-auth': token } });
+      const json = await response.json();
+      if (response.ok && json && json.token) { token = json.token; return true; }
+    } catch {}
+    return false;
+  }
+
+  async function call(url, body, retried) {
+    const response = await fetch(url, {
+      method: body ? 'POST' : 'GET',
+      headers: { 'risu-auth': token, ...(body ? { 'content-type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const text = await response.text();
+    let json = null; try { json = JSON.parse(text); } catch {}
+    // 표가 만료돼 거절된 요청은 아직 아무 일도 하지 않았다: 새 표로 한 번 더 보낸다.
+    if (!response.ok && json && json.error === 'Token Expired' && !retried && await renewToken()) return call(url, body, true);
+    if (!response.ok) throw new Error((json && json.error) || text.slice(0, 200) || ('오류 ' + response.status));
+    return json;
+  }
+
+  async function login() {
+    $('loginError').textContent = '';
+    try {
+      // 앱과 같은 방식: 비밀번호를 그대로 보내지 않고, 서버가 만들어 준 요약값을 보낸다.
+      const digested = await fetch('/api/crypto', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data: $('password').value }) });
+      if (!digested.ok) throw new Error('비밀번호를 확인하지 못했습니다 (' + digested.status + ').');
+      const response = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: await digested.text() }) });
+      if (response.status === 429) throw new Error('시도가 너무 많았습니다. 잠시 뒤에 다시 해 주세요.');
+      const json = await response.json();
+      if (!json.token) throw new Error('비밀번호가 맞지 않습니다.');
+      token = json.token;
+      setInterval(renewToken, 3 * 60 * 1000);
+      $('login').classList.add('hidden');
+      $('main').classList.remove('hidden');
+      await refresh();
+      await showLastRun();
+    } catch (error) { $('loginError').textContent = error.message; }
+  }
+
+  async function refresh() {
+    data = await call('/api/bangju/archive');
+    picked = new Set();
+    readFolders();
+    fillFolders();
+    render();
+    if (data.factsPending) watchFacts();
+  }
+
+  // 폴더 고르기: 앱에 있는 폴더, 폴더 없음, 그리고 보관된 봇이 들어 있던(지금은 없어진) 폴더.
+  function fillFolders() {
+    const select = $('folder');
+    const chosen = select.value;
+    const options = [['*', '모든 폴더']].concat((data.folders || []).map(folder => [folder.id, folder.name || '(이름 없는 폴더)']));
+    const gone = new Map();
+    for (const item of data.archived) if (item.folderName !== undefined && item.folderId) gone.set(item.folderId, item.folderName);
+    for (const [id, name] of gone) options.push([id, (name || '(이름 없는 폴더)') + ' (없어진 폴더)']);
+    options.push(['', '폴더 없음']);
+    select.textContent = '';
+    for (const [value, label] of options) { const option = document.createElement('option'); option.value = value; option.textContent = label; select.append(option); }
+    select.value = options.some(([value]) => value === chosen) ? chosen : '*';
+    select.classList.toggle('hidden', options.length <= 2);
+  }
+
+  // 쓰는 봇의 태그·표지는 앱이 열린 적이 없으면 서버가 뒤에서 읽는다. 다 읽을 때까지 가끔 물어 채운다.
+  let factsWatch = 0;
+  async function watchFacts() {
+    const mine = ++factsWatch;
+    for (let attempt = 0; attempt < 200 && mine === factsWatch; attempt++) {
+      await sleep(3000);
+      let answer = null;
+      try { answer = await call('/api/bangju/archive/facts'); } catch { continue; }
+      if (mine !== factsWatch) return;
+      let changed = false;
+      for (const item of data.active) {
+        const known = answer.facts[item.id];
+        if (known && (item.hasCover !== known.hasCover || item.tags.join('\u0001') !== known.tags.join('\u0001'))) {
+          item.tags = known.tags; item.hasCover = known.hasCover; changed = true;
+        }
+      }
+      if (changed && !busy) render();
+      if (!answer.pending) return;
+    }
+  }
+
+  // 봇이 들어 있는(보관된 봇은 들어 있던) 폴더의 이름과 순서. 폴더 순서는 앱에 보이는 순서 그대로다.
+  let folderNames = new Map();
+  let folderRank = new Map();
+  function readFolders() {
+    folderNames = new Map();
+    folderRank = new Map();
+    (data.folders || []).forEach((folder, at) => { folderNames.set(folder.id, folder.name || '(이름 없는 폴더)'); folderRank.set(folder.id, at); });
+    for (const item of data.archived) {
+      if (item.folderId && item.folderName !== undefined && !folderNames.has(item.folderId)) {
+        folderNames.set(item.folderId, (item.folderName || '(이름 없는 폴더)') + ' (없어진 폴더)');
+        folderRank.set(item.folderId, 100000 + folderRank.size);
+      }
+    }
+  }
+  // 어느 묶음에 드는지: 아는 폴더면 그 폴더, 아니면 '폴더 없음'('').
+  const groupOf = item => (item.folderId && folderNames.has(item.folderId) ? item.folderId : '');
+  const rankOf = item => (groupOf(item) ? folderRank.get(item.folderId) : 1000000);
+
+  function visibleItems() {
+    const folder = $('folder').value;
+    const items = (tab === 'active' ? data.active : data.archived).filter(item => folder === '*' || (item.folderId || '') === folder);
+    const query = $('search').value.trim().toLowerCase();
+    const filtered = query
+      ? items.filter(item => (item.name || '').toLowerCase().includes(query) || (item.tags || []).some(tag => tag.toLowerCase().includes(query)))
+      : items;
+    const sort = $('sort').value;
+    if (sort === 'size') filtered.sort((a, b) => (b.cardBytes || 0) - (a.cardBytes || 0));
+    else if (sort === 'name') filtered.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
+    else if (sort === 'folder') filtered.sort((a, b) => rankOf(a) - rankOf(b) || (a.name || '').localeCompare(b.name || '', 'ko'));
+    else if (sort === 'idle') filtered.sort((a, b) => (a.lastChatAt || 0) - (b.lastChatAt || 0));
+    else filtered.sort((a, b) => (b.lastChatAt || 0) - (a.lastChatAt || 0));
+    return filtered;
+  }
+
+  const day = time => (time ? new Date(time).toLocaleDateString('ko-KR', { year: '2-digit', month: 'numeric', day: 'numeric' }) : '');
+
+  // --- 표지: 원본 크기 그림이라 '표지 보기'를 켰을 때, 화면에 보이는 줄만 받아 온다 ---
+  const covers = new Map();   // 봇 ID → 그림 주소(없으면 '')
+  const waiting = [];
+  let loading = 0;
+  function wantCover(id, element) {
+    if (covers.has(id)) { paintCover(element, covers.get(id)); return; }
+    waiting.push({ id, element });
+    pumpCovers();
+  }
+  // 그림이 실제로 그려질 때만 글자 자리를 표지로 바꾼다(깨진 그림이면 글자를 그대로 둔다).
+  function paintCover(element, url) {
+    if (!url) return;
+    const probe = new Image();
+    probe.onload = () => { element.style.backgroundImage = 'url("' + url + '")'; element.textContent = ''; };
+    probe.src = url;
+  }
+  async function pumpCovers() {
+    while (loading < 3 && waiting.length) {
+      const { id, element } = waiting.shift();
+      if (covers.has(id)) { paintCover(element, covers.get(id)); continue; }
+      loading += 1;
+      (async () => {
+        let url = '';
+        try {
+          const response = await fetch('/api/bangju/archive/cover/' + encodeURIComponent(id), { headers: { 'risu-auth': token } });
+          if (response.ok) url = URL.createObjectURL(await response.blob());
+        } catch {}
+        covers.set(id, url);
+        paintCover(element, url);
+      })().finally(() => { loading -= 1; pumpCovers(); });
+    }
+  }
+  const coverWatcher = 'IntersectionObserver' in window ? new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      coverWatcher.unobserve(entry.target);
+      wantCover(entry.target.dataset.id, entry.target);
+    }
+  }, { rootMargin: '200px' }) : null;
+
+  // --- 목록: 한 화면 분량(100줄)씩 그린다. 수천 개여도 처음 화면은 가볍다 ---
+  const PAGE = 100;
+  let shown = [];
+  let drawn = 0;
+  const moreWatcher = 'IntersectionObserver' in window ? new IntersectionObserver(entries => {
+    if (entries.some(entry => entry.isIntersecting)) drawMore();
+  }, { rootMargin: '400px' }) : null;
+
+  function rowFor(item) {
+    const row = document.createElement('label');
+    row.className = 'row' + (picked.has(item.id) ? ' picked' : '');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = picked.has(item.id);
+    box.addEventListener('change', () => {
+      box.checked ? picked.add(item.id) : picked.delete(item.id);
+      row.classList.toggle('picked', box.checked);
+      count();
+    });
+    const cover = document.createElement('span');
+    cover.className = 'cover';
+    cover.dataset.id = item.id;
+    cover.textContent = (item.name || '?').trim().slice(0, 1);
+    if ($('showCovers').checked && item.hasCover && coverWatcher) coverWatcher.observe(cover);
+    const main = document.createElement('span');
+    main.className = 'main';
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = item.name || '(이름 없음)';
+    main.append(name);
+    // 폴더 이름은 폴더별로 묶어 보거나 한 폴더만 볼 때는 줄마다 되풀이하지 않는다.
+    const showFolder = groupOf(item) && $('sort').value !== 'folder' && $('folder').value === '*';
+    if (showFolder || (item.tags || []).length) {
+      const tags = document.createElement('div');
+      tags.className = 'tags';
+      if (showFolder) { const chip = document.createElement('span'); chip.className = 'in-folder'; chip.textContent = '폴더: ' + folderNames.get(item.folderId); tags.append(chip); }
+      for (const tag of (item.tags || []).slice(0, 4)) { const chip = document.createElement('span'); chip.textContent = tag; tags.append(chip); }
+      main.append(tags);
+    }
+    const side = document.createElement('span');
+    side.className = 'side';
+    const size = document.createElement('b');
+    size.textContent = mb(item.cardBytes || 0);
+    side.append(size, '채팅 ' + (item.chats || 0) + (item.lastChatAt ? ' · ' + day(item.lastChatAt) : ''));
+    row.append(box, cover, main, side);
+    return row;
+  }
+
+  function drawMore() {
+    const list = $('list');
+    const old = list.querySelector('.more');
+    if (old) { if (moreWatcher) moreWatcher.unobserve(old); old.remove(); }
+    const fragment = document.createDocumentFragment();
+    const grouped = $('sort').value === 'folder';
+    shown.slice(drawn, drawn + PAGE).forEach((item, at) => {
+      const before = shown[drawn + at - 1];
+      if (grouped && (!before || groupOf(before) !== groupOf(item))) {
+        const head = document.createElement('div');
+        head.className = 'group';
+        const key = groupOf(item);
+        head.textContent = (key ? folderNames.get(key) : '폴더 없음') + ' · ' + shown.filter(other => groupOf(other) === key).length + '개';
+        fragment.append(head);
+      }
+      fragment.append(rowFor(item));
+    });
+    drawn = Math.min(shown.length, drawn + PAGE);
+    list.append(fragment);
+    if (drawn < shown.length) {
+      const more = document.createElement('div');
+      more.className = 'more';
+      more.textContent = shown.length + '개 중 ' + drawn + '개 표시 · 더 보기';
+      more.addEventListener('click', drawMore);
+      list.append(more);
+      if (moreWatcher) moreWatcher.observe(more);
+    }
+  }
+
+  function render() {
+    const t = data.totals;
+    // 봇을 넣거나 지울 때 앱은 쓰는 것 전체를 한 번에 올린다. 그 한도에 얼마나 가까운지 보여 준다.
+    const limit = t.serverRequestLimitBytes || 0;
+    const share = limit ? Math.min(100, Math.round(t.activeCardBytes / limit * 100)) : 0;
+    $('totals').innerHTML = '쓰는 것 <b>' + t.active + '개</b> · 글 데이터 합계 <b>' + mb(t.activeCardBytes) + '</b> (앱을 열 때 받는 양과 거의 같음)'
+      + (limit ? '<div class="meter"><i class="' + (share >= 80 ? 'high' : '') + '" style="width:' + share + '%"></i></div>'
+        + '<span class="' + (share >= 80 ? 'warn' : 'note') + '">봇 추가·삭제 한도 ' + mb(limit) + '의 ' + share + '%'
+        + (share >= 100 ? ' — 한도를 넘었습니다. 지금은 봇을 넣거나 지울 수 없습니다.' : share >= 80 ? ' — 한도에 가깝습니다.' : '') + '</span><br>' : '<br>')
+      + '보관함 <b>' + t.archived + '개</b> · 글 데이터 합계 ' + mb(t.archivedCardBytes) + '<br>'
+      + (t.unprotectedBots ? '<span class="warn">보관된 봇 ' + t.unprotectedBots + '개의 그림에 보호 이름표가 없습니다. 아래 \'보관된 봇 다시 확인\'을 눌러 주세요.</span><br>' : '')
+      + '<span class="note">서버 보관 사본(채팅 포함) ' + mb(t.storedCopyBytes) + '</span>';
+    $('tabActive').setAttribute('aria-selected', String(tab === 'active'));
+    $('tabArchived').setAttribute('aria-selected', String(tab === 'archived'));
+    $('moveButton').textContent = tab === 'active' ? '고른 것 보관하기' : '고른 것 불러오기';
+    $('keepOnlyButton').classList.toggle('hidden', tab !== 'active');
+    const list = $('list');
+    list.classList.toggle('plain', !$('showCovers').checked);
+    list.textContent = '';
+    shown = visibleItems();
+    drawn = 0;
+    if (!shown.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = $('search').value.trim() ? '찾는 봇이 없습니다.' : (tab === 'active' ? '쓰는 봇이 없습니다.' : '보관함이 비어 있습니다.');
+      list.append(empty);
+    } else drawMore();
+    count();
+  }
+
+  function count() {
+    const items = tab === 'active' ? data.active : data.archived;
+    const bytes = items.filter(item => picked.has(item.id)).reduce((total, item) => total + (item.cardBytes || 0), 0);
+    $('selected').textContent = picked.size ? picked.size + '개 고름 · ' + mb(bytes) : '옮길 봇을 고르세요';
+    $('moveButton').disabled = busy || !picked.size;
+    $('keepOnlyButton').disabled = busy || !picked.size;
+  }
+
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+  // 한 번 옮긴 결과를 글로 풀어 쓴다. 서버가 남겨 둔 '마지막 결과'에도 똑같이 쓴다.
+  function describeRun(run) {
+    const word = run.direction === 'archive' ? '보관' : '불러오기';
+    if (run.status !== 'done') return ['실패: ' + (run.error || run.code || '알 수 없는 오류')];
+    const t = run.timings || {};
+    const a = run.assets || {};
+    const lines = [
+      word + ' ' + run.moved.length + '개 완료, 실패 ' + run.failed.length + '개',
+      '걸린 시간: ' + ((run.totalMs || 0) / 1000).toFixed(1) + '초 (저장 정리 ' + (t.flushMs || 0) + 'ms, 폴더 옮기기 ' + (t.moveMs || 0) + 'ms'
+        + (t.adoptMs !== undefined ? ', 목록 다시 읽기 ' + t.adoptMs + 'ms' : '') + ')',
+      '쓰는 것: ' + run.before.active + '개 → ' + run.after.active + '개',
+    ];
+    if (run.direction === 'archive') {
+      lines.push('그림 보호: 이름표 ' + (a.protected || 0) + '장, 봇 폴더 안 ' + (a.inFolder || 0) + '장, 못 찾음 ' + (a.missing || 0) + '장'
+        + (a.inModule ? ' (이름표 가운데 모듈 폴더에 있던 것 ' + a.inModule + '장)' : '')
+        + (a.viaApp ? ' (이름표 가운데 앱에서 읽어 사본을 뜬 것 ' + a.viaApp + '장)' : '')
+        + (a.copied && a.copied !== a.viaApp ? ', 복사 ' + (a.copied - (a.viaApp || 0)) + '장' : ''));
+      for (const item of (run.missing || []).slice(0, 5)) {
+        lines.push('  못 찾은 그림: ' + (item.name || item.id) + ' ' + item.count + '장 (예: ' + item.examples.slice(0, 2).join(', ') + ')' + whyText(item.why));
+      }
+      if ((run.missing || []).length > 5) lines.push('  … 그 밖에 봇 ' + ((run.missing || []).length - 5) + '개');
+      lines.push(...mentionLines(a.unmatched, run.mentions, true));
+    } else {
+      if (a.returned) lines.push('그림 되돌려 놓음: ' + a.returned + '장');
+      if (run.foldersRestored) lines.push('앱 목록의 원래 자리로 돌려놓음: ' + run.foldersRestored + '개 (그 가운데 폴더 안으로 ' + (run.intoFolders || 0) + '개)');
+    }
+    if (run.failed.length) lines.push('실패한 것: ' + JSON.stringify(run.failed.slice(0, 10)));
+    if (run.settle === 'pending') lines.push('목록 정리는 서버가 뒤에서 합니다. 앱을 열어도 됩니다.');
+    return lines;
+  }
+
+  function describeSettle(settled) {
+    if (!settled) return [];
+    if (settled.status === 'done') return ['목록 정리 완료 (' + ((settled.totalMs || 0) / 1000).toFixed(1) + '초)'];
+    if (settled.status === 'rolled-back') {
+      return ['목록 정리 실패: ' + (settled.error || ''), '옮긴 ' + (settled.rolledBack || 0) + '개를 원래 자리로 되돌렸습니다.'
+        + ((settled.notRolledBack || []).length ? ' 되돌리지 못한 것: ' + JSON.stringify(settled.notRolledBack.slice(0, 10)) : '')];
+    }
+    return [];
+  }
+
+  // 연결이 끊겨도 서버는 일을 끝까지 한다. 이 요청의 결과가 남을 때까지 기다린다.
+  async function waitForRun(runId) {
+    let idleChecks = 0;
+    for (let attempt = 0; attempt < 600; attempt++) {
+      await sleep(3000);
+      let status = null;
+      try { status = await call('/api/bangju/archive/status'); } catch { continue; }
+      if (status.last && status.last.runId === runId) return status.last;
+      if (!status.running && !status.queued && ++idleChecks >= 5) return null;
+    }
+    return null;
+  }
+
+  // 옮긴 뒤 서버의 목록 정리가 끝나면 결과 아래에 한 줄 덧붙인다.
+  let settleWatch = 0;
+  async function watchSettle(lines, since) {
+    const mine = ++settleWatch;
+    for (let attempt = 0; attempt < 400 && mine === settleWatch; attempt++) {
+      await sleep(2000);
+      let status = null;
+      try { status = await call('/api/bangju/archive/status'); } catch { continue; }
+      if (mine !== settleWatch || busy) return;
+      const settled = status.lastSettle;
+      if (status.settle.state === 'idle' && !status.settle.bots) {
+        const fresh = settled && new Date(settled.finishedAt).getTime() >= since ? describeSettle(settled) : ['목록 정리 완료'];
+        $('result').textContent = lines.filter(line => !line.startsWith('목록 정리는')).concat(fresh).join('\n');
+        if (settled && settled.status === 'rolled-back') { try { await refresh(); } catch {} }
+        // The server holds the list in memory again: tags and covers of the bots in use are complete now.
+        else watchFacts();
+        return;
+      }
+    }
+  }
+
+  async function move(ids, direction, resume, question) {
+    if (busy || (!resume && !ids.length)) return;
+    const word = direction === 'archive' ? '보관' : '불러오기';
+    if (!resume && !confirm(question || (ids.length + '개를 ' + word + '할까요?'))) return;
+    busy = true; count();
+    settleWatch += 1;
+    const startedAt = Date.now();
+    let progress = '';
+    const waiting = () => {
+      $('result').textContent = word + ' 중입니다… ' + Math.round((Date.now() - startedAt) / 1000) + '초 지남' + (progress ? '\n' + progress : '')
+        + '\n많으면 몇 분 걸립니다. 이 창을 닫아도 서버는 끝까지 하고, 다시 열면 결과가 보입니다.';
+    };
+    waiting();
+    const timer = setInterval(waiting, 1000);
+    // 서버가 몇 개째 하고 있는지 물어본다.
+    const poller = setInterval(async () => {
+      try {
+        const status = await call('/api/bangju/archive/status');
+        if (status.running) progress = status.running.done + ' / ' + status.running.total + '개' + (status.running.current ? ' · 지금: ' + status.running.current : '');
+        else if (status.queued) progress = '앞선 작업이 끝나기를 기다리는 중';
+      } catch {}
+    }, 2000);
+    const runId = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+    try {
+      let run;
+      try {
+        run = await call('/api/bangju/archive/move', resume ? { resume: true, runId } : { ids, direction, runId });
+      } catch (error) {
+        // TypeError = 답을 받기 전에 연결이 끊긴 경우. 그 밖의 오류는 서버가 답한 것이다.
+        if (!(error instanceof TypeError)) throw error;
+        run = await waitForRun(runId);
+        if (!run) throw new Error('서버와 연결이 끊겨 결과를 받지 못했습니다. 이 화면을 새로 고쳐 보세요.');
+      }
+      clearInterval(timer); clearInterval(poller);
+      const lines = describeRun(run);
+      $('result').textContent = lines.join('\n');
+      try { await refresh(); }
+      catch (error) { $('result').textContent = lines.concat('(목록을 새로 고치지 못했습니다: ' + error.message + ' — 화면을 새로 고쳐 주세요.)').join('\n'); }
+      if (run.settle === 'pending') watchSettle(lines, startedAt);
+    } catch (error) {
+      clearInterval(timer); clearInterval(poller);
+      $('result').textContent = '실패: ' + error.message;
+      try { await refresh(); } catch {}
+    } finally { clearInterval(timer); clearInterval(poller); busy = false; count(); showInterrupted(); }
+  }
+
+  // 서버가 중간에 꺼져서 끊긴 묶음이 있으면 이어서 할지 묻는다.
+  async function showInterrupted() {
+    try {
+      const status = await call('/api/bangju/archive/status');
+      const pending = status.interrupted;
+      $('interrupted').classList.toggle('hidden', !pending);
+      if (pending) {
+        const word = pending.direction === 'archive' ? '보관' : '불러오기';
+        $('interruptedText').textContent = '지난번 ' + word + '가 중간에 끊겼습니다. ' + pending.total + '개 중 ' + pending.remaining + '개가 남았습니다.';
+        $('resumeButton').onclick = () => move([], pending.direction, true);
+        $('dismissButton').onclick = async () => { try { await call('/api/bangju/archive/dismiss-interrupted', {}); } catch {} showInterrupted(); };
+      }
+      return status;
+    } catch { return null; }
+  }
+
+  // 화면을 다시 열었을 때: 지난번 결과가 남아 있으면 보여 준다.
+  async function showLastRun() {
+    const status = await showInterrupted();
+    if (!status) return;
+    if (status.running || status.queued) {
+      $('result').textContent = '지금 서버가 옮기는 중입니다' + (status.running ? ' (' + status.running.done + ' / ' + status.running.total + '개)' : '') + '. 끝나면 이 화면을 새로 고쳐 주세요.';
+    } else if (status.last) {
+      const lines = ['마지막 작업 (' + new Date(status.last.finishedAt).toLocaleString('ko-KR') + ')'].concat(describeRun(status.last));
+      const settled = status.lastSettle && new Date(status.lastSettle.finishedAt) >= new Date(status.last.finishedAt) ? describeSettle(status.lastSettle) : [];
+      $('result').textContent = lines.filter(line => !settled.length || !line.startsWith('목록 정리는')).concat(settled).join('\n');
+      if (status.settle.state !== 'idle') watchSettle(lines, new Date(status.last.finishedAt).getTime() - 1000);
+    }
+  }
+
+  // 못 찾은 그림에 대해 알 수 있는 단서(원인을 가려내는 데 쓴다).
+  function whyText(why) {
+    if (!why) return '';
+    return '\n    단서: 새 창고식 이름 ' + why.storeNames + '장 · 앱 목록에 이름이 남은 것 ' + why.listed + '장 · 이 봇 폴더 안 그림 파일 '
+      + why.folderFiles + '개 · 폴더 방식 봇 ' + (why.packaged ? '예' : '아니오');
+  }
+
+  // 글이나 채팅 안에만 나오는 그림 이름(카드가 그림으로 등록한 것이 아님) 가운데 그 이름으로 저장된 그림이 없는 것.
+  // 보관할 때는 앱이 읽을 수 있는 그림이면 모두 이름표를 받으므로, 그때 남는 것은 앱도 읽지 못하는 이름이다.
+  function mentionLines(count, mentions, atArchive) {
+    if (!count) return [];
+    const lines = ['카드에 등록된 그림이 아닌 이름 ' + count + '개(글·채팅 안에만 나옴): '
+      + (atArchive ? '보관하는 지금 앱도 그 이름의 그림을 읽지 못합니다. 보관함이 잃은 것이 아닙니다.' : '지금 그 이름으로 저장된 그림이 없습니다.')];
+    for (const item of (mentions || []).slice(0, 5)) lines.push('  ' + (item.name || item.id) + ' ' + item.count + '개 (예: ' + item.examples.slice(0, 2).join(', ') + ')');
+    return lines;
+  }
+
+  function describeRecheck(checked) {
+    const t = checked.totals;
+    const lines = [
+      // 글자로만 나오는 이름은 그림이 아니므로 그림 수에서 뺀다.
+      '보관된 봇 ' + t.bots + '개, 그림 ' + (t.images - (t.unmatched || 0)) + '장 확인 (' + ((checked.totalMs || 0) / 1000).toFixed(1) + '초)',
+      '이미 이름표 있음 ' + t.alreadyKept + '장 · 이번에 이름표 붙임 ' + t.added + '장 · 봇 폴더 안에 있음(폴더 방식 봇) ' + t.inFolder + '장 · 어디에도 없음 ' + t.missing + '장',
+      '이번에 붙인 것 가운데: 모듈 폴더에 있던 것 ' + (t.inModule || 0) + '장 · 앱에서 읽어 사본을 뜬 것 ' + (t.viaApp || 0) + '장'
+        + (t.copied && t.copied !== t.viaApp ? ' · 복사 ' + (t.copied - (t.viaApp || 0)) + '장' : ''),
+      '목록 정보(태그·표지)를 채운 봇 ' + (t.listFilled || 0) + '개 · 들어 있던 폴더를 찾은 봇 ' + (t.foldersFound || 0) + '개',
+    ];
+    for (const item of (checked.missing || []).slice(0, 10)) {
+      lines.push(item.error ? '  확인 실패: ' + (item.name || item.id) + ' — ' + item.error
+        : '  어디에도 없음: ' + (item.name || item.id) + ' ' + item.count + '장 (예: ' + item.examples.slice(0, 2).join(', ') + ')' + whyText(item.why));
+    }
+    if ((checked.missing || []).length > 10) lines.push('  … 그 밖에 봇 ' + (checked.missing.length - 10) + '개');
+    lines.push(...mentionLines(t.unmatched, checked.mentions, false));
+    return lines;
+  }
+
+  async function recheck() {
+    if (busy) return;
+    busy = true; count();
+    $('recheckButton').disabled = true;
+    $('recheckResult').textContent = '확인하는 중입니다…';
+    try { $('recheckResult').textContent = describeRecheck(await call('/api/bangju/archive/recheck', {})).join('\n'); }
+    catch (error) { $('recheckResult').textContent = '실패: ' + error.message; }
+    finally { busy = false; count(); $('recheckButton').disabled = false; try { await refresh(); } catch {} }
+  }
+
+  $('recheckButton').addEventListener('click', recheck);
+  $('loginButton').addEventListener('click', login);
+  $('password').addEventListener('keydown', event => { if (event.key === 'Enter') login(); });
+  $('tabActive').addEventListener('click', () => { tab = 'active'; picked = new Set(); render(); });
+  $('tabArchived').addEventListener('click', () => { tab = 'archived'; picked = new Set(); render(); });
+  $('search').addEventListener('input', render);
+  $('sort').addEventListener('change', render);
+  $('folder').addEventListener('change', render);
+  try { $('showCovers').checked = localStorage.getItem('bangju.covers') === '1'; } catch {}
+  $('showCovers').addEventListener('change', () => {
+    try { localStorage.setItem('bangju.covers', $('showCovers').checked ? '1' : '0'); } catch {}
+    render();
+  });
+  $('selectAll').addEventListener('click', () => { for (const item of visibleItems()) picked.add(item.id); render(); });
+  $('selectNone').addEventListener('click', () => { picked = new Set(); render(); });
+  $('selectTop').addEventListener('click', () => {
+    const count = Math.max(1, Number($('topCount').value) || 0);
+    picked = new Set(visibleItems().slice(0, count).map(item => item.id));
+    render();
+  });
+  fetch('/api/bangju/version').then(response => response.json()).then(info => {
+    // 시험용 설치본은 '버전'(커밋)이 있고, 본 설치본은 '코드' 표시만 있다. 코드가 같으면 '코드' 값이 같다.
+    $('version').textContent = (info.commit ? '버전 ' + info.commit + ' · ' : '') + '코드 ' + (info.code || '?')
+      + (info.builtAt ? ' · ' + new Date(info.builtAt).toLocaleString('ko-KR') : '');
+  }).catch(() => {});
+  $('moveButton').addEventListener('click', () => move([...picked], tab === 'active' ? 'archive' : 'restore'));
+  $('keepOnlyButton').addEventListener('click', () => {
+    const rest = data.active.filter(item => !picked.has(item.id)).map(item => item.id);
+    move(rest, 'archive', false, '고른 ' + picked.size + '개만 남기고, 나머지 ' + rest.length + '개를 보관할까요?');
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,68 @@
+name: Bangju - full check
+
+# 방주 전체 자동 점검. 방주 가지나 본체에 올릴 때마다, 지금까지 만든 방주 기능의 검사와
+# 앱의 서버 테스트를 처음부터 끝까지 다시 돌립니다. Actions 탭에서 직접 실행할 수도 있습니다.
+# 하는 일은 test/bangju-proto/run-all.sh 한 줄입니다. 새 기능의 검사는 그 파일에 더합니다.
+
+on:
+  push:
+    branches: [ "main", "bangju/**" ]
+  workflow_dispatch:
+
+concurrency:
+  group: bangju-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Bangju full check
+    # Only forks run this.
+    if: github.repository != 'rpaddict/RisuBard'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      # onnxruntime-node 1.21.0's Linux CUDA download now returns 404; the app uses the CPU build.
+      ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.1
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@v4
+        name: Setup pnpm cache
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Bangju full check
+        run: test/bangju-proto/run-all.sh
+
+      - name: Keep the logs of a failed check
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bangju-check-logs
+          path: /tmp/bangju-check.*/
+          retention-days: 7
