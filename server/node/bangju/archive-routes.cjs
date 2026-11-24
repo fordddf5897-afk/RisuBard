@@ -13,6 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { createBangjuArchive, STORE_DIRECTORY } = require('./archive.cjs');
+const { createTwins } = require('./twins.cjs');
 const { stableId } = require('../user-data-repository.cjs');
 const { collectDatabaseAssetReferences, collectNestedAssetReferences } = require('../orphan-cleanup.cjs');
 const { atomicWriteJson } = require('../file-store.cjs');
@@ -511,6 +512,24 @@ function registerBangjuArchiveRoutes(app, {
         const memory = memoryFacts();
         for (const [id, value] of memory || cachedFacts()) facts[id] = { tags: value.tags || [], hasCover: Boolean(value.image) };
         res.set('Cache-Control', 'no-store').json({ pending: memory ? 0 : factsPending(), facts });
+    });
+
+    // 내용이 똑같은 봇: 쓰는 것과 보관함 양쪽에 카드 내용이 100% 같은 봇이 있으면 알려 준다.
+    // 카드 파일을 읽기만 하고, 뒤에서 조금씩 읽는다(한 번 읽은 봇은 파일이 바뀔 때만 다시 읽는다).
+    const twins = createTwins({ cacheFile: path.join(archive.archiveRoot, 'content-prints.json'), logger });
+    app.get('/api/bangju/archive/twins', async (req, res, next) => {
+        if (!await auth(req, res)) return;
+        try {
+            await queue(async () => {
+                const stored = archive.listArchived();
+                const cardOf = id => { try { return path.join(dataRoot, repository.characterDirectoryPath(id), 'metadata.json'); } catch { return ''; } };
+                const active = activeEntries(stored).map(entry => ({ id: entry.id, file: cardOf(entry.id) })).filter(item => item.file);
+                const archived = [];
+                for (const entry of stored) { try { archived.push({ id: entry.id, file: archive.archivedCardFile(entry) }); } catch { /* an entry without a folder */ } }
+                twins.look(active, archived, { force: req.query.fresh === '1' });
+            });
+            res.set('Cache-Control', 'no-store').json({ pending: twins.pending(), ...twins.twins() });
+        } catch (error) { next(error); }
     });
 
     // 표지 그림. 보관된 봇은 보관함이 지키고 있는 그림에서, 쓰는 봇은 앱의 그림 창고에서 준다.

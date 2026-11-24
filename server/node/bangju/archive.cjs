@@ -678,6 +678,11 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
     }
 
     // The kept copy of an archived bot's cover image, if it has one.
+    // An archived bot's card file (for comparing contents; read only).
+    function archivedCardFile(entry) {
+        return path.join(inside(archivedCharacters, path.join(archivedCharacters, String(entry?.directory || ''))), 'metadata.json');
+    }
+
     function archivedCoverPath(id) {
         const entry = loadIndex().characters.find(item => item.id === id);
         if (!entry?.image) return null;
@@ -714,7 +719,7 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
     }
 
     return {
-        archiveRoot, storeRoot, listArchived, listFacts, archivedCoverPath, unprotectedCount, move, recover, recheck,
+        archiveRoot, storeRoot, listArchived, listFacts, archivedCoverPath, archivedCardFile, unprotectedCount, move, recover, recheck,
         pendingBatch, clearPendingBatch, referencedAssets, referencedAssetsOrEmpty,
     };
 }
