@@ -48,7 +48,7 @@ jobs:
           short=$(git rev-parse --short HEAD)
           echo "short=$short" >> "$GITHUB_OUTPUT"
           mkdir -p server/node/bangju
-          printf '{"commit":"%s","builtAt":"%s"}\n' "$short" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > server/node/bangju/build-info.json
+          printf '{"commit":"%s","builtAt":"%s","repository":"%s","tag":"bangju-test-%s","kind":"test"}\n' "$short" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$GITHUB_REPOSITORY" "$short" > server/node/bangju/build-info.json
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

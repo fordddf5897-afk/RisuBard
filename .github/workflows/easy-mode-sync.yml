@@ -258,6 +258,15 @@ jobs:
         with:
           ref: ${{ needs.sync.outputs.sha }}
 
+      # bangju: the running app reports which image it is (/api/bangju/version, /bangju/update).
+      - name: Build info
+        shell: bash
+        env:
+          SHA: ${{ needs.sync.outputs.sha }}
+        run: |
+          mkdir -p server/node/bangju
+          printf '{"commit":"%s","builtAt":"%s","repository":"%s","tag":"sha-%s","kind":"main"}\n' "${SHA:0:7}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$GITHUB_REPOSITORY" "${SHA:0:7}" > server/node/bangju/build-info.json
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -339,3 +348,27 @@ jobs:
             echo "- \`${IMAGE}:latest\`"
             echo "- \`${IMAGE}:easy-${VERSION}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # bangju: writes down which image is the newest, for the update screen (/bangju/update).
+  record:
+    name: Record the image
+    needs: [sync, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # the bangju-status branch
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.sync.outputs.sha }}
+
+      - name: Write and publish main-image.json
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.sync.outputs.version }}
+          SHA: ${{ needs.sync.outputs.sha }}
+        run: |
+          printf '{"schemaVersion":1,"tag":"sha-%s","commit":"%s","version":"%s","builtAt":"%s","runUrl":"%s"}\n' \
+            "${SHA:0:7}" "$SHA" "$VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > "$RUNNER_TEMP/main-image.json"
+          bash deploy/bangju/publish-status.sh "main image sha-${SHA:0:7}" "$RUNNER_TEMP/main-image.json"

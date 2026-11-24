@@ -63,13 +63,14 @@ test('the bundled garden skin passes the app skin validator', () => {
 
 describe('archive entry on the classic screen', () => {
     test('is added once to the sidebar menu and the settings navigation, only where the archive page exists', () => {
-        const count = () => [additionalHamburgerMenu, additionalSettingsMenu].map((menu) => menu.filter((item) => item.name === '보관함 관리').length)
+        const count = () => [additionalHamburgerMenu, additionalSettingsMenu].map((menu) => menu.filter((item) => item.name === '보관함 관리' || item.name === '업데이트 확인').length)
         const before = count()
         registerArchiveEntry(false)
         expect(count()).toEqual(before)
         registerArchiveEntry(true)
         registerArchiveEntry(true)
-        expect(count()).toEqual([1, 1])
+        expect(count()).toEqual([2, 2])
+        expect(additionalSettingsMenu.map((item) => item.name).filter((name) => name !== '간편 모드로 전환')).toEqual(['보관함 관리', '업데이트 확인'])
         expect(ARCHIVE_PATH).toBe('/bangju/archive')
         const entry = additionalHamburgerMenu.find((item) => item.name === '보관함 관리')
         expect(entry?.pluginName).toBe('easy-mode')

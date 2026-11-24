@@ -1,0 +1,175 @@
+name: Bangju - update check
+
+# 방주 업데이트 확인(미리 합쳐 보기).
+# RisuBard 새 버전이 나왔는지 보고, 여기서만 임시로 합쳐 본 뒤 검사를 돌립니다.
+# 본 코드(main)에는 아무것도 올리지 않습니다. 결과는 bangju-status 가지의 update-check.json에
+# 적히고, 앱의 '업데이트 확인' 화면(/bangju/update)이 그것을 읽어 보여 줍니다.
+#
+# 직접 실행할 때 '복사본에서 먼저 해 볼 설치본도 만들기'를 체크하면, 합쳐 본 코드로 시험용
+# 설치본(ghcr.io/<아이디>/<저장소>:bangju-test-up-...)도 만듭니다. 사본 데이터에서만 쓰세요.
+# 실제로 합치는 일은 'Easy mode - RisuBard sync and image' 작업이 합니다.
+
+on:
+  workflow_dispatch:
+    inputs:
+      trial_image:
+        description: '복사본에서 먼저 해 볼 설치본도 만들기'
+        type: boolean
+        default: false
+  schedule:
+    # 매일 04:23 (한국 시간). 새 버전이 없으면 1분 안에 끝납니다.
+    - cron: '23 19 * * *'
+  # 본 코드가 바뀌어 새 설치본을 만든 뒤에도 한 번 다시 봅니다(결과가 예전 기준으로 남지 않게).
+  workflow_run:
+    workflows: ['Easy mode - RisuBard sync and image']
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: bangju-update-check
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  # onnxruntime-node 1.21.0's Linux CUDA download now returns 404; the app uses the CPU build.
+  ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
+jobs:
+  check:
+    name: Try the merge and check
+    # Only forks have something to merge.
+    if: github.repository != 'rpaddict/RisuBard'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    permissions:
+      contents: write   # the result file on the bangju-status branch
+      packages: write   # the trial image
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.1
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        name: Setup pnpm cache
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      # The result of the last check: the same two versions are not checked twice.
+      # The publish helper is set aside now: later the working copy holds the merged code.
+      - name: Earlier result
+        shell: bash
+        run: |
+          cp deploy/bangju/publish-status.sh "$RUNNER_TEMP/publish-status.sh"
+          curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/bangju-status/update-check.json" -o "$RUNNER_TEMP/previous.json" \
+            || echo '{}' > "$RUNNER_TEMP/previous.json"
+
+      # Merges in this runner's working copy only; nothing is committed or pushed.
+      - name: Look for a new version, try the merge, run the checks
+        id: check
+        shell: bash
+        run: node deploy/bangju/update-check.cjs --out "$RUNNER_TEMP/update-check.json" --checks --keep-merge --previous "$RUNNER_TEMP/previous.json"
+
+      - name: Trial image names
+        id: trial
+        if: inputs.trial_image && steps.check.outputs.status == 'clean' && steps.check.outputs.checks_ok == 'true'
+        shell: bash
+        run: |
+          upstream="${{ steps.check.outputs.upstream_sha }}"
+          base="$(git rev-parse HEAD)"
+          tag="bangju-test-up-${upstream:0:7}-${base:0:7}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "image=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          mkdir -p server/node/bangju
+          printf '{"commit":"up-%s","builtAt":"%s","repository":"%s","tag":"%s","kind":"trial"}\n' "${upstream:0:7}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$GITHUB_REPOSITORY" "$tag" > server/node/bangju/build-info.json
+
+      - name: Set up Docker Buildx
+        if: steps.trial.outputs.tag != ''
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the Container registry
+        if: steps.trial.outputs.tag != ''
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Built from the merged working copy, which exists only in this runner.
+      - name: Build and push the trial image
+        if: steps.trial.outputs.tag != ''
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ steps.trial.outputs.image }}:${{ steps.trial.outputs.tag }}
+          cache-from: type=gha,scope=easy-linux-amd64
+          cache-to: type=gha,scope=bangju-trial,mode=max
+
+      - name: Note the trial image in the result
+        if: steps.trial.outputs.tag != ''
+        shell: bash
+        env:
+          TAG: ${{ steps.trial.outputs.tag }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const file = process.argv[1];
+            const result = JSON.parse(fs.readFileSync(file, "utf8"));
+            result.trialImage = { tag: process.env.TAG, builtAt: new Date().toISOString() };
+            fs.writeFileSync(file, JSON.stringify(result, null, 2) + "\n");
+          ' "$RUNNER_TEMP/update-check.json"
+
+      # A file on its own branch. The app reads it without signing in to GitHub.
+      - name: Publish the result
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash "$RUNNER_TEMP/publish-status.sh" "update check - ${{ steps.check.outputs.status }}" "$RUNNER_TEMP/update-check.json"
+
+      - name: Summary
+        shell: bash
+        env:
+          TAG: ${{ steps.trial.outputs.tag }}
+        run: |
+          node -e '
+            const result = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+            const risk = { high: "높음", medium: "중간", low: "낮음", none: "없음" }[result.risk] || result.risk;
+            const lines = [];
+            if (result.status === "up-to-date") lines.push(`새 버전이 없습니다. RisuBard ${result.upstream.version}까지 들어 있습니다.`);
+            else {
+              lines.push(`RisuBard ${result.upstream.version}: 변경 ${result.commits.total}개, 바뀐 파일 ${result.files.total}개.`, "", `위험도: **${risk}**`, "");
+              for (const reason of result.reasons) lines.push(`- ${reason}`);
+              if (process.env.TAG) lines.push("", `복사본용 설치본: \`${process.env.TAG}\``);
+            }
+            lines.push("", "본 코드에는 아무것도 올리지 않았습니다. 앱의 업데이트 확인 화면(/bangju/update)에서 볼 수 있습니다.");
+            console.log(lines.join("\n"));
+          ' "$RUNNER_TEMP/update-check.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the logs of failed checks
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bangju-update-check-logs
+          path: /tmp/bangju-check.*/
+          retention-days: 7

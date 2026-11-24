@@ -204,8 +204,13 @@ async function until(check, ms = 20000) { const end = Date.now() + ms; for (;;) 
         plugins: document.querySelector('[data-easy-open-plugins]')?.textContent.trim(),
         archive: document.querySelector('[data-easy-open-archive]')?.getAttribute('href'),
         target: document.querySelector('[data-easy-open-archive]')?.getAttribute('target'),
+        update: document.querySelector('[data-easy-open-update]')?.getAttribute('href'),
+        updateName: document.querySelector('[data-easy-open-update]')?.textContent.trim(),
+        updateTarget: document.querySelector('[data-easy-open-update]')?.getAttribute('target'),
     }));
     ok('easy-mode settings link to module and plugin management and to the archive', links.modules === '모듈 관리' && links.plugins === '플러그인 관리' && links.archive === '/bangju/archive' && links.target === '_blank', JSON.stringify(links));
+    const updatePage = await page.evaluate(async href => { const response = await fetch(href); return { status: response.status, title: /<title>([^<]*)/.exec(await response.text())?.[1] }; }, links.update || '/missing');
+    ok('they also link to the update check, which the server serves', links.update === '/bangju/update' && links.updateName.startsWith('업데이트 확인') && links.updateTarget === '_blank' && updatePage.status === 200 && updatePage.title === '방주 업데이트', JSON.stringify({ links, updatePage }));
     await page.click('[data-easy-open-modules]');
     const settings = await until(async () => !(await page.$('[data-easy-shell]')) && !!(await page.$('.settings-page')), 10000);
     ok('"모듈 관리" opens the existing management screen', settings === true);
