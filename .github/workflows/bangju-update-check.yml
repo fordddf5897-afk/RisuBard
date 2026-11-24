@@ -10,9 +10,6 @@ name: Bangju - update check
 # 실제로 합치는 일은 'Easy mode - RisuBard sync and image' 작업이 합니다.
 
 on:
-  # REHEARSAL ONLY (this branch is thrown away): run on push, against an older main, with a trial image.
-  push:
-    branches: ['bangju/u2-rehearsal']
   workflow_dispatch:
     inputs:
       trial_image:
@@ -52,17 +49,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # REHEARSAL, second run: main as it is now, so the published result is the true one.
           ref: ${{ github.event.repository.default_branch }}
-
-      # REHEARSAL: that older tree has no update-check tools; take them from this branch, outside the working copy.
-      - name: Tools from the rehearsal branch
-        shell: bash
-        run: |
-          mkdir -p "$RUNNER_TEMP/tools"
-          git fetch -q origin "$GITHUB_SHA"
-          git archive "$GITHUB_SHA" deploy/bangju | tar -x -C "$RUNNER_TEMP/tools"
-          ls "$RUNNER_TEMP/tools/deploy/bangju"
 
       - name: setup node
         uses: actions/setup-node@v4
@@ -92,7 +79,7 @@ jobs:
       - name: Earlier result
         shell: bash
         run: |
-          cp "$RUNNER_TEMP/tools/deploy/bangju/publish-status.sh" "$RUNNER_TEMP/publish-status.sh"
+          cp deploy/bangju/publish-status.sh "$RUNNER_TEMP/publish-status.sh"
           curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/bangju-status/update-check.json" -o "$RUNNER_TEMP/previous.json" \
             || echo '{}' > "$RUNNER_TEMP/previous.json"
 
@@ -100,7 +87,7 @@ jobs:
       - name: Look for a new version, try the merge, run the checks
         id: check
         shell: bash
-        run: node "$RUNNER_TEMP/tools/deploy/bangju/update-check.cjs" --out "$RUNNER_TEMP/update-check.json" --checks --keep-merge --previous "$RUNNER_TEMP/previous.json"
+        run: node deploy/bangju/update-check.cjs --out "$RUNNER_TEMP/update-check.json" --checks --keep-merge --previous "$RUNNER_TEMP/previous.json"
 
       - name: Trial image names
         id: trial
@@ -159,16 +146,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash "$RUNNER_TEMP/publish-status.sh" "update check - ${{ steps.check.outputs.status }}" "$RUNNER_TEMP/update-check.json"
-
-      # REHEARSAL: the image main already has (built before the workflow recorded images), written down once
-      # through the same helper, so the screen has it and the two files are seen to live side by side.
-      - name: Record the current main image
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          printf '{"schemaVersion":1,"tag":"sha-cbc5948","commit":"cbc59488bc8ecb06c789a0fcf750f2118f522ea5","version":"0.9.104","builtAt":"2026-11-24T06:54:34Z","runUrl":"https://github.com/fordddf5897-afk/RisuBard/actions/runs/45343303260"}\n' > "$RUNNER_TEMP/main-image.json"
-          bash "$RUNNER_TEMP/publish-status.sh" "main image sha-cbc5948" "$RUNNER_TEMP/main-image.json"
 
       - name: Summary
         shell: bash

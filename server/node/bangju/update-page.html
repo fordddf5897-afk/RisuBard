@@ -132,7 +132,7 @@
     const actions = 'https://github.com/' + info.repository + '/actions/workflows/' + info.mergeWorkflow;
     let body = '';
     const latest = runs.data ? (runs.data.workflow_runs || []).find(run => run.head_branch === 'main') : null;
-    if (latest && latest.status !== 'completed') body += '<p class="line" id="building">새 설치본을 <b>만드는 중</b>입니다(' + esc(when(latest.created_at)) + ' 시작). 15분쯤 걸립니다. 끝나면 새로고침해 주세요.</p>';
+    if (latest && latest.status !== 'completed') body += '<p class="line" id="building">새 설치본을 <b>만드는 중</b>입니다(' + esc(when(latest.created_at)) + ' 시작). 10분쯤 걸립니다. 끝나면 새로고침해 주세요.</p>';
     else if (latest && latest.conclusion !== 'success') body += '<p class="line warn" id="buildFailed">마지막 설치본 만들기가 끝까지 가지 못했습니다(실패 또는 취소). <a href="' + esc(latest.html_url) + '" target="_blank" rel="noopener">실행 기록 보기</a></p>';
 
     const known = image.data && image.data.schemaVersion === 1 && /^[A-Za-z0-9._-]+$/.test(String(image.data.tag || '')) ? image.data : null;
@@ -201,11 +201,11 @@
             + '<li' + (medium ? '' : ' class="note"') + '><b>복사본에서 먼저 해 봅니다</b>' + (medium ? '' : ' (위험도가 낮아 건너뛰어도 됩니다)') + '.<br>'
             + (trial
               ? '복사본용 설치본: <span class="tag" id="trialTag">' + esc(trial) + '</span>. 복사본 프로젝트에서 아래 순서로 올리고, 평소 쓰는 것이 되는지 봅니다.' + nasSteps(trial, '복사본 프로젝트(예: bangju-test)')
-              : '복사본용 설치본이 아직 없습니다. ' + runCheck + ' → <b>"복사본에서 먼저 해 볼 설치본도 만들기"를 체크</b>하고 실행합니다. 20분쯤 뒤 새로고침하면 여기에 이름표가 나옵니다.')
+              : '복사본용 설치본이 아직 없습니다. ' + runCheck + ' → <b>"복사본에서 먼저 해 볼 설치본도 만들기"를 체크</b>하고 실행합니다. 10~15분 뒤 새로고침하면 여기에 이름표가 나옵니다.')
             + '</li>'
             + '<li id="mergeStep" class="hidden"><b>본 코드에 합칩니다.</b> <a href="' + esc(mergePage) + '" target="_blank" rel="noopener">GitHub에서 "Easy mode - RisuBard sync and image" 열기</a> → <b>Run workflow</b> → <b>"RisuBard 새 버전 합치기"를 체크</b> → Run workflow.<br>'
             + '<span class="note">저장소 첫 화면의 Sync fork나 Create pull request는 누르지 않습니다.</span></li>'
-            + '<li id="nasStep" class="hidden"><b>NAS를 갱신합니다.</b> 15분쯤 뒤 이 화면을 새로고침하면 위 "본 코드의 설치본"에 새 이름표와 순서가 나옵니다.</li>'
+            + '<li id="nasStep" class="hidden"><b>NAS를 갱신합니다.</b> 10~15분 뒤 이 화면을 새로고침하면 위 "본 코드의 설치본"에 새 이름표와 순서가 나옵니다.</li>'
             + '</ol><p class="note" id="snapshotNote">스냅샷을 찍었다고 표시하면 나머지 순서가 나옵니다.</p>';
         }
       }
@@ -223,7 +223,7 @@
     const installs = (info.history || []).slice().reverse();
     const rows = installs.map((item, at) => '<li><span class="tag">' + esc(item.tag) + '</span> · v' + esc(item.appVersion || '?')
       + ' <span class="note">(' + esc(when(item.firstRunAt)) + '부터' + (at === 0 ? ', 지금' : '') + (item.kind && item.kind !== 'main' ? ', 시험용' : '') + ')</span></li>').join('');
-    $('history').innerHTML = '<h2>이전 설치본</h2>'
+    $('history').innerHTML = '<h2>설치본 기록</h2><p class="note">이 데이터에서 돌았던 설치본입니다. 새것이 위에 있습니다.</p>'
       + (installs.length ? '<ul id="installs">' + rows + '</ul>' : '<p class="note">아직 기록이 없습니다. 이 화면이 들어간 설치본부터 기록됩니다.</p>')
       + '<details><summary>되돌리는 법</summary>'
       + '<p class="line">설치본은 위 NAS 순서와 똑같이, <code>image:</code> 줄의 끝을 되돌아갈 이름표로 바꾸면 됩니다.</p>'

@@ -94,7 +94,7 @@ const none = { status: 404, body: {} };
         && merge.includes('RisuBard 새 버전 합치기') && merge.includes('Sync fork') && await page.$eval('#mergeStep a', link => link.href) === `https://github.com/${REPO}/actions/workflows/easy-mode-sync.yml`, merge.slice(0, 140));
     ok('without a trial image it says how to get one', upstream.includes('복사본용 설치본이 아직 없습니다') && upstream.includes('복사본에서 먼저 해 볼 설치본도 만들기') && !(await has('#trialTag')));
     const history = await text('history');
-    ok('the installed image is in the install history', (await text('installs')).includes('sha-aaaaaaa') && history.includes('지금') && history.includes('되돌리는 법'), history.slice(0, 120));
+    ok('the installed image is in the install history', (await text('installs')).includes('sha-aaaaaaa') && history.includes('설치본 기록') && history.includes('지금') && history.includes('되돌리는 법'), history.slice(0, 120));
 
     // 2. a trial image exists
     await open({ image: found(mainImage(MAIN)), status: found(check({ trialImage: { tag: 'bangju-test-up-ccccccc-bbbbbbb', builtAt: '2026-11-24T06:40:00Z' } })) });
