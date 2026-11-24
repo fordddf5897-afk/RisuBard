@@ -29,7 +29,7 @@ function botAssetReferences(metadata) {
 
 function registerBangjuArchiveRoutes(app, {
     auth, queue, repository, dataRoot, isBlocked, flush, hasExternalChanges, adopt,
-    revokeSessions, databaseBytes, kv, activeCharacters, logger,
+    revokeSessions, databaseBytes, kv, activeDatabase, logger,
 }) {
     const archive = createBangjuArchive({
         dataRoot,
@@ -50,10 +50,121 @@ function registerBangjuArchiveRoutes(app, {
     }
 
     const elapsed = startedAt => Math.round(performance.now() - startedAt);
+    // 옮겼지만 서버가 아직 다시 읽지 않은 묶음들. 다시 읽기가 실패하면 이것을 되돌린다.
+    let unsettled = [];
     const opposite = direction => (direction === 'archive' ? 'restore' : 'archive');
     // 검증 스크립트용: 'now'이면 옮긴 요청 안에서 정리까지 끝내고 답한다.
     const settleNowByDefault = process.env.BANGJU_ARCHIVE_SETTLE === 'now';
     const settleDelayMs = Math.max(0, Number(process.env.BANGJU_ARCHIVE_SETTLE_DELAY_MS ?? 5000) || 0);
+
+    // --- 앱의 폴더 ---
+    // 앱의 봇 목록 순서(settings/app.json의 characterOrder)는 봇 ID 또는 폴더({ id, name, data: [봇 ID] })로
+    // 되어 있다. 봇이 목록에서 사라지면 앱이 폴더에서도 그 ID를 지우므로, 보관할 때 자리를 적어 두었다가
+    // 불러올 때 같은 폴더의 같은 자리에 다시 넣는다.
+    const SETTINGS_FILE = 'settings/app.json';
+    function readSettings() {
+        try { return JSON.parse(fs.readFileSync(path.join(dataRoot, SETTINGS_FILE), 'utf8')); } catch { return null; }
+    }
+    // What the app shows right now. The server's memory is newer than the file while a save is
+    // waiting; after our own move the file is newer until the server has reloaded (which the app
+    // opening can do before our own tidy-up runs).
+    function currentSettings() {
+        let memory = null;
+        try { memory = activeDatabase ? activeDatabase() : null; } catch { /* read the file */ }
+        if (!Array.isArray(memory?.characterOrder)) return readSettings();
+        let stale = false;
+        try { stale = unsettled.length > 0 && hasExternalChanges(); } catch { stale = unsettled.length > 0; }
+        return stale ? readSettings() : memory;
+    }
+    function folderMap(settings = currentSettings()) {
+        const folders = [];
+        const where = new Map();
+        const order = Array.isArray(settings?.characterOrder) ? settings.characterOrder : [];
+        order.forEach((item, index) => {
+            if (typeof item === 'string') where.set(item, { index });
+            else if (item && typeof item === 'object' && Array.isArray(item.data)) {
+                const folder = { id: String(item.id ?? ''), name: String(item.name ?? '') };
+                folders.push(folder);
+                item.data.forEach((chaId, at) => {
+                    if (typeof chaId === 'string') where.set(chaId, { folderId: folder.id, folderName: folder.name, index: at });
+                });
+            }
+        });
+        return { folders, where };
+    }
+
+    // Puts restored bots back into the folders they were in. Runs before the server reloads.
+    function restoreFolders(entries) {
+        const settings = readSettings();
+        if (!settings || !Array.isArray(settings.characterOrder)) return 0;
+        const { where } = folderMap(settings);
+        let placed = 0;
+        // Lowest place first, so several bots of one folder come back in their old order.
+        const sorted = entries.filter(entry => entry?.order).sort((a, b) => (a.order.index | 0) - (b.order.index | 0));
+        for (const { chaId, order } of sorted) {
+            // Still listed (the app was not opened in between): it never left its place.
+            if (typeof chaId !== 'string' || !order || where.has(chaId)) continue;
+            if (order.folderId) {
+                const folder = settings.characterOrder.find(item => item && typeof item === 'object' && String(item.id ?? '') === order.folderId && Array.isArray(item.data));
+                // The folder was deleted meanwhile: the app lists the bot outside folders.
+                if (!folder) continue;
+                folder.data.splice(Math.min(Math.max(order.index | 0, 0), folder.data.length), 0, chaId);
+            } else {
+                settings.characterOrder.splice(Math.min(Math.max(order.index | 0, 0), settings.characterOrder.length), 0, chaId);
+            }
+            where.set(chaId, order);
+            placed += 1;
+        }
+        if (placed) atomicWriteJson(dataRoot, SETTINGS_FILE, settings);
+        return placed;
+    }
+
+    // --- 쓰는 봇의 태그와 표지 ---
+    // 서버가 목록을 메모리에 들고 있으면(앱이 한 번이라도 열렸으면) 거기서 읽는다. 아니면 봇의
+    // metadata.json에서 읽어야 하는데, 봇이 많으면 오래 걸리므로 뒤에서 조금씩 읽어 적어 둔다.
+    const FACTS_FILE = 'active-facts.json';
+    let factsCache = null;
+    const factsQueue = [];
+    const factsQueued = new Set();
+    let factsBusy = false;
+    function cachedFacts() {
+        if (!factsCache) {
+            factsCache = new Map();
+            try {
+                const stored = JSON.parse(fs.readFileSync(path.join(archive.archiveRoot, FACTS_FILE), 'utf8'));
+                for (const [id, value] of Object.entries(stored?.bots || {})) factsCache.set(id, value);
+            } catch { /* nothing cached yet */ }
+        }
+        return factsCache;
+    }
+    function readFactsFromDisk(id) {
+        const file = path.join(dataRoot, repository.characterDirectoryPath(id), 'metadata.json');
+        const stat = fs.statSync(file);
+        return { stamp: `${stat.size}:${Math.round(stat.mtimeMs)}`, ...archive.listFacts(JSON.parse(fs.readFileSync(file, 'utf8'))) };
+    }
+    function queueFacts(id) {
+        if (factsQueued.has(id)) return;
+        factsQueued.add(id);
+        factsQueue.push(id);
+        if (factsBusy) return;
+        factsBusy = true;
+        (async () => {
+            let read = 0;
+            while (factsQueue.length) {
+                const next = factsQueue.shift();
+                try { cachedFacts().set(next, readFactsFromDisk(next)); } catch { /* the bot left or is unreadable */ }
+                factsQueued.delete(next);
+                read += 1;
+                // One bot's file at a time, with room for other requests in between.
+                await new Promise(resolve => setTimeout(resolve, read % 20 === 0 ? 30 : 0));
+            }
+            try {
+                fs.mkdirSync(archive.archiveRoot, { recursive: true });
+                fs.writeFileSync(path.join(archive.archiveRoot, FACTS_FILE), JSON.stringify({ schemaVersion: 1, bots: Object.fromEntries(cachedFacts()) }));
+            } catch { /* kept in memory only */ }
+        })().finally(() => { factsBusy = false; });
+    }
+    const factsPending = () => factsQueue.length + (factsBusy ? 1 : 0);
 
     // Until the server reloads, its list index still names archived bots; leave them out.
     function activeEntries(archivedEntries = archive.listArchived()) {
@@ -64,28 +175,54 @@ function registerBangjuArchiveRoutes(app, {
     // The last time a bot was talked to, from the list index entry (its chats carry their last date).
     const lastChatAt = entry => Math.max(0, entry?.updatedAt || 0, ...(entry?.chats || []).map(chat => chat?.lastDate || 0));
 
-    // Tags and cover of the bots in use come from the list the server already holds in memory.
-    function activeFacts() {
-        const facts = new Map();
+    // Tags and cover of the bots in use, from the list the server holds in memory (null when it holds none yet).
+    function memoryFacts() {
         try {
-            for (const character of (activeCharacters ? activeCharacters() : []) || []) {
+            const characters = activeDatabase ? activeDatabase()?.characters : null;
+            if (!Array.isArray(characters) || !characters.length) return null;
+            const facts = new Map();
+            for (const character of characters) {
                 if (typeof character?.chaId === 'string') facts.set(stableId(character.chaId, 'character'), archive.listFacts(character));
             }
-        } catch { /* The list is shown without tags and covers. */ }
-        return facts;
+            return facts;
+        } catch { return null; }
     }
 
-    function listActive(archivedEntries) {
-        const facts = activeFacts();
+    // One bot's tags and cover name, wherever they can be had right now.
+    function factsOf(id) {
+        const known = memoryFacts()?.get(id) || cachedFacts().get(id);
+        if (known) return known;
+        try {
+            const read = readFactsFromDisk(id);
+            cachedFacts().set(id, read);
+            return read;
+        } catch { return null; }
+    }
+
+    function listActive(archivedEntries, placement = folderMap()) {
+        const memory = memoryFacts();
+        const cache = memory ? null : cachedFacts();
+        const folderOf = new Map();
+        for (const [chaId, place] of placement.where) folderOf.set(stableId(chaId, 'character'), place.folderId || '');
         return activeEntries(archivedEntries).map(character => {
             let cardBytes = 0;
+            let stamp = '';
             try {
-                cardBytes = fs.statSync(path.join(dataRoot, repository.characterDirectoryPath(character.id), 'metadata.json')).size;
+                const stat = fs.statSync(path.join(dataRoot, repository.characterDirectoryPath(character.id), 'metadata.json'));
+                cardBytes = stat.size;
+                stamp = `${stat.size}:${Math.round(stat.mtimeMs)}`;
             } catch { /* Listed but unreadable: shown with size 0. */ }
-            const known = facts.get(character.id);
+            let known = memory?.get(character.id);
+            if (!known && cache) {
+                const cached = cache.get(character.id);
+                if (cached && cached.stamp === stamp) known = cached;
+                // Not read yet (or the bot changed): read it in the background; the page asks again.
+                else if (stamp) queueFacts(character.id);
+            }
             return {
                 id: character.id, name: character.name || '', cardBytes, chats: (character.chats || []).length,
                 lastChatAt: lastChatAt(character), tags: known?.tags || [], hasCover: Boolean(known?.image),
+                folderId: folderOf.get(character.id) || '',
             };
         });
     }
@@ -135,8 +272,6 @@ function registerBangjuArchiveRoutes(app, {
 
     let running = null;
     let queued = 0;
-    // 옮겼지만 서버가 아직 다시 읽지 않은 묶음들. 다시 읽기가 실패하면 이것을 되돌린다.
-    let unsettled = [];
     let settleTimer = null;
     let settleState = { state: 'idle' };
 
@@ -164,12 +299,18 @@ function registerBangjuArchiveRoutes(app, {
     async function moveFolders(ids, direction, onProgress) {
         const listed = repository.loadSidebarIndex().characters || [];
         const positions = new Map(listed.map((character, position) => [character.id, position]));
+        const placement = direction === 'archive' ? folderMap() : null;
         const result = await archive.move({
             ids, direction, onProgress,
             sidebarOf: id => (positions.has(id) ? { position: positions.get(id), entry: listed[positions.get(id)] } : null),
+            orderOf: chaId => placement?.where.get(chaId) || null,
             pause: () => new Promise(resolve => setImmediate(resolve)),
         });
         if (direction === 'restore' && result.restoredSidebar.length) restoreListOrder(result.restoredSidebar);
+        if (direction === 'restore' && result.restoredOrder.length) {
+            try { result.foldersRestored = restoreFolders(result.restoredOrder); }
+            catch (error) { logger?.warn?.('[Bangju archive] Could not put restored bots back into their folders', error); }
+        }
         return result;
     }
 
@@ -245,17 +386,25 @@ function registerBangjuArchiveRoutes(app, {
             await queue(async () => {
                 const startedAt = performance.now();
                 const stored = archive.listArchived();
-                const active = listActive(stored);
+                const placement = folderMap();
+                const folderIds = new Set(placement.folders.map(folder => folder.id));
+                const active = listActive(stored, placement);
                 // The stored entries also carry what a restore needs; the list shows the basics.
                 const archived = stored.map(entry => ({
                     id: entry.id, name: entry.name, cardBytes: entry.cardBytes, chats: entry.chats,
                     assetCount: entry.assetCount, archivedAt: entry.archivedAt,
                     lastChatAt: lastChatAt(entry.sidebar), tags: entry.tags || [], hasCover: Boolean(entry.image),
+                    // The app folder it was in. A folder deleted since then is shown by its old name.
+                    folderId: entry.order?.folderId || '',
+                    ...(entry.order?.folderId && !folderIds.has(entry.order.folderId) ? { folderName: entry.order.folderName || '' } : {}),
                     ...(entry.missingAssets ? { missingAssets: entry.missingAssets } : {}),
                 }));
                 const sum = list => list.reduce((total, item) => total + (item.cardBytes || 0), 0);
                 res.json({
                     active, archived,
+                    folders: placement.folders,
+                    // 쓰는 봇 가운데 태그·표지를 아직 읽지 못한 수. 화면이 조금 뒤 /facts로 다시 묻는다.
+                    factsPending: factsPending(),
                     totals: {
                         active: active.length, activeCardBytes: sum(active),
                         archived: archived.length, archivedCardBytes: sum(archived),
@@ -269,6 +418,15 @@ function registerBangjuArchiveRoutes(app, {
                 });
             });
         } catch (error) { next(error); }
+    });
+
+    // 쓰는 봇의 태그·표지 여부(뒤에서 읽고 있는 것의 진행 상황). 목록을 통째로 다시 받지 않게 따로 준다.
+    app.get('/api/bangju/archive/facts', async (req, res) => {
+        if (!await auth(req, res)) return;
+        const facts = {};
+        const memory = memoryFacts();
+        for (const [id, value] of memory || cachedFacts()) facts[id] = { tags: value.tags || [], hasCover: Boolean(value.image) };
+        res.set('Cache-Control', 'no-store').json({ pending: memory ? 0 : factsPending(), facts });
     });
 
     // 표지 그림. 보관된 봇은 보관함이 지키고 있는 그림에서, 쓰는 봇은 앱의 그림 창고에서 준다.
@@ -286,7 +444,7 @@ function registerBangjuArchiveRoutes(app, {
                 name = kept;
             } else {
                 const stored = archive.listArchived().find(entry => entry.id === id);
-                name = stored ? (stored.image || '') : (activeFacts().get(id)?.image || '');
+                name = stored ? (stored.image || '') : (factsOf(id)?.image || '');
                 if (name && kv?.get) bytes = kv.get(`assets/${name}`);
             }
             if (!bytes || !bytes.length) return res.status(404).json({ error: 'No cover image' });
@@ -328,7 +486,9 @@ function registerBangjuArchiveRoutes(app, {
             const checked = await queue(async () => {
                 mine = { direction: 'recheck', total: 0, done: 0, current: '', startedAt: new Date().toISOString() };
                 running = mine;
+                const placement = folderMap();
                 return archive.recheck({
+                    orderOf: chaId => placement.where.get(chaId) || null,
                     onProgress: progress => { mine.total = progress.total; mine.done = progress.done; mine.current = progress.name; },
                     pause: () => new Promise(resolve => setImmediate(resolve)),
                 });
@@ -438,6 +598,7 @@ function registerBangjuArchiveRoutes(app, {
                 finish(200, {
                     status: 'done',
                     moved: result.moved, failed: result.failed, assets: result.assets, missing: result.missing,
+                    ...(result.foldersRestored ? { foldersRestored: result.foldersRestored } : {}),
                     before, after, timings,
                     // 'pending': 목록 다시 읽기는 조금 뒤(또는 앱이 열릴 때) 한다.
                     settle: settled ? settled.status : (result.moved.length ? 'pending' : 'nothing'),

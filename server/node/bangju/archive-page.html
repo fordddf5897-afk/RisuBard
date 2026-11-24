@@ -39,6 +39,8 @@
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tags { display: flex; gap: 4px; overflow: hidden; margin-top: 2px; }
   .tags span { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 0 5px; white-space: nowrap; }
+  .tags span.in-folder { border-color: transparent; background: var(--soft); }
+  .group { padding: 7px 12px; font-size: 13px; font-weight: 600; color: var(--muted); background: var(--soft); border-bottom: 1px solid var(--soft); }
   .side { text-align: right; font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; flex: none; }
   .side b { display: block; font-size: 13px; color: inherit; font-weight: 600; }
   .more { padding: 10px; text-align: center; color: var(--muted); font-size: 13px; }
@@ -78,11 +80,13 @@
   </div>
   <div class="bar">
     <input id="search" type="search" placeholder="이름이나 태그로 찾기">
+    <select id="folder" aria-label="폴더"><option value="*">모든 폴더</option></select>
     <select id="sort" aria-label="정렬">
       <option value="size">용량 큰 순</option>
       <option value="idle">오래 안 쓴 순</option>
       <option value="recent">최근 대화순</option>
       <option value="name">이름순</option>
+      <option value="folder">폴더별로 묶기</option>
     </select>
     <label class="toggle"><input id="showCovers" type="checkbox"> 표지 보기</label>
   </div>
@@ -162,11 +166,69 @@
   async function refresh() {
     data = await call('/api/bangju/archive');
     picked = new Set();
+    readFolders();
+    fillFolders();
     render();
+    if (data.factsPending) watchFacts();
   }
 
+  // 폴더 고르기: 앱에 있는 폴더, 폴더 없음, 그리고 보관된 봇이 들어 있던(지금은 없어진) 폴더.
+  function fillFolders() {
+    const select = $('folder');
+    const chosen = select.value;
+    const options = [['*', '모든 폴더']].concat((data.folders || []).map(folder => [folder.id, folder.name || '(이름 없는 폴더)']));
+    const gone = new Map();
+    for (const item of data.archived) if (item.folderName !== undefined && item.folderId) gone.set(item.folderId, item.folderName);
+    for (const [id, name] of gone) options.push([id, (name || '(이름 없는 폴더)') + ' (없어진 폴더)']);
+    options.push(['', '폴더 없음']);
+    select.textContent = '';
+    for (const [value, label] of options) { const option = document.createElement('option'); option.value = value; option.textContent = label; select.append(option); }
+    select.value = options.some(([value]) => value === chosen) ? chosen : '*';
+    select.classList.toggle('hidden', options.length <= 2);
+  }
+
+  // 쓰는 봇의 태그·표지는 앱이 열린 적이 없으면 서버가 뒤에서 읽는다. 다 읽을 때까지 가끔 물어 채운다.
+  let factsWatch = 0;
+  async function watchFacts() {
+    const mine = ++factsWatch;
+    for (let attempt = 0; attempt < 200 && mine === factsWatch; attempt++) {
+      await sleep(3000);
+      let answer = null;
+      try { answer = await call('/api/bangju/archive/facts'); } catch { continue; }
+      if (mine !== factsWatch) return;
+      let changed = false;
+      for (const item of data.active) {
+        const known = answer.facts[item.id];
+        if (known && (item.hasCover !== known.hasCover || item.tags.join('\u0001') !== known.tags.join('\u0001'))) {
+          item.tags = known.tags; item.hasCover = known.hasCover; changed = true;
+        }
+      }
+      if (changed && !busy) render();
+      if (!answer.pending) return;
+    }
+  }
+
+  // 봇이 들어 있는(보관된 봇은 들어 있던) 폴더의 이름과 순서. 폴더 순서는 앱에 보이는 순서 그대로다.
+  let folderNames = new Map();
+  let folderRank = new Map();
+  function readFolders() {
+    folderNames = new Map();
+    folderRank = new Map();
+    (data.folders || []).forEach((folder, at) => { folderNames.set(folder.id, folder.name || '(이름 없는 폴더)'); folderRank.set(folder.id, at); });
+    for (const item of data.archived) {
+      if (item.folderId && item.folderName !== undefined && !folderNames.has(item.folderId)) {
+        folderNames.set(item.folderId, (item.folderName || '(이름 없는 폴더)') + ' (없어진 폴더)');
+        folderRank.set(item.folderId, 100000 + folderRank.size);
+      }
+    }
+  }
+  // 어느 묶음에 드는지: 아는 폴더면 그 폴더, 아니면 '폴더 없음'('').
+  const groupOf = item => (item.folderId && folderNames.has(item.folderId) ? item.folderId : '');
+  const rankOf = item => (groupOf(item) ? folderRank.get(item.folderId) : 1000000);
+
   function visibleItems() {
-    const items = (tab === 'active' ? data.active : data.archived).slice();
+    const folder = $('folder').value;
+    const items = (tab === 'active' ? data.active : data.archived).filter(item => folder === '*' || (item.folderId || '') === folder);
     const query = $('search').value.trim().toLowerCase();
     const filtered = query
       ? items.filter(item => (item.name || '').toLowerCase().includes(query) || (item.tags || []).some(tag => tag.toLowerCase().includes(query)))
@@ -174,6 +236,7 @@
     const sort = $('sort').value;
     if (sort === 'size') filtered.sort((a, b) => (b.cardBytes || 0) - (a.cardBytes || 0));
     else if (sort === 'name') filtered.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
+    else if (sort === 'folder') filtered.sort((a, b) => rankOf(a) - rankOf(b) || (a.name || '').localeCompare(b.name || '', 'ko'));
     else if (sort === 'idle') filtered.sort((a, b) => (a.lastChatAt || 0) - (b.lastChatAt || 0));
     else filtered.sort((a, b) => (b.lastChatAt || 0) - (a.lastChatAt || 0));
     return filtered;
@@ -251,10 +314,13 @@
     name.className = 'name';
     name.textContent = item.name || '(이름 없음)';
     main.append(name);
-    if ((item.tags || []).length) {
+    // 폴더 이름은 폴더별로 묶어 보거나 한 폴더만 볼 때는 줄마다 되풀이하지 않는다.
+    const showFolder = groupOf(item) && $('sort').value !== 'folder' && $('folder').value === '*';
+    if (showFolder || (item.tags || []).length) {
       const tags = document.createElement('div');
       tags.className = 'tags';
-      for (const tag of item.tags.slice(0, 4)) { const chip = document.createElement('span'); chip.textContent = tag; tags.append(chip); }
+      if (showFolder) { const chip = document.createElement('span'); chip.className = 'in-folder'; chip.textContent = '폴더: ' + folderNames.get(item.folderId); tags.append(chip); }
+      for (const tag of (item.tags || []).slice(0, 4)) { const chip = document.createElement('span'); chip.textContent = tag; tags.append(chip); }
       main.append(tags);
     }
     const side = document.createElement('span');
@@ -271,7 +337,18 @@
     const old = list.querySelector('.more');
     if (old) { if (moreWatcher) moreWatcher.unobserve(old); old.remove(); }
     const fragment = document.createDocumentFragment();
-    for (const item of shown.slice(drawn, drawn + PAGE)) fragment.append(rowFor(item));
+    const grouped = $('sort').value === 'folder';
+    shown.slice(drawn, drawn + PAGE).forEach((item, at) => {
+      const before = shown[drawn + at - 1];
+      if (grouped && (!before || groupOf(before) !== groupOf(item))) {
+        const head = document.createElement('div');
+        head.className = 'group';
+        const key = groupOf(item);
+        head.textContent = (key ? folderNames.get(key) : '폴더 없음') + ' · ' + shown.filter(other => groupOf(other) === key).length + '개';
+        fragment.append(head);
+      }
+      fragment.append(rowFor(item));
+    });
     drawn = Math.min(shown.length, drawn + PAGE);
     list.append(fragment);
     if (drawn < shown.length) {
@@ -338,13 +415,16 @@
     ];
     if (run.direction === 'archive') {
       lines.push('그림 보호: 이름표 ' + (a.protected || 0) + '장, 봇 폴더 안 ' + (a.inFolder || 0) + '장, 못 찾음 ' + (a.missing || 0) + '장'
-        + (a.copied ? ', 복사 ' + a.copied + '장' : ''));
+        + (a.inModule ? ' (이름표 가운데 모듈 폴더에 있던 것 ' + a.inModule + '장)' : '')
+        + (a.viaApp ? ' (이름표 가운데 앱에서 읽어 사본을 뜬 것 ' + a.viaApp + '장)' : '')
+        + (a.copied && a.copied !== a.viaApp ? ', 복사 ' + (a.copied - (a.viaApp || 0)) + '장' : ''));
       for (const item of (run.missing || []).slice(0, 5)) {
-        lines.push('  못 찾은 그림: ' + (item.name || item.id) + ' ' + item.count + '장 (예: ' + item.examples.slice(0, 2).join(', ') + ')');
+        lines.push('  못 찾은 그림: ' + (item.name || item.id) + ' ' + item.count + '장 (예: ' + item.examples.slice(0, 2).join(', ') + ')' + whyText(item.why));
       }
       if ((run.missing || []).length > 5) lines.push('  … 그 밖에 봇 ' + ((run.missing || []).length - 5) + '개');
-    } else if (a.returned) {
-      lines.push('그림 되돌려 놓음: ' + a.returned + '장');
+    } else {
+      if (a.returned) lines.push('그림 되돌려 놓음: ' + a.returned + '장');
+      if (run.foldersRestored) lines.push('원래 있던 폴더로 돌려놓음: ' + run.foldersRestored + '개');
     }
     if (run.failed.length) lines.push('실패한 것: ' + JSON.stringify(run.failed.slice(0, 10)));
     if (run.settle === 'pending') lines.push('목록 정리는 서버가 뒤에서 합니다. 앱을 열어도 됩니다.');
@@ -388,6 +468,8 @@
         const fresh = settled && new Date(settled.finishedAt).getTime() >= since ? describeSettle(settled) : ['목록 정리 완료'];
         $('result').textContent = lines.filter(line => !line.startsWith('목록 정리는')).concat(fresh).join('\n');
         if (settled && settled.status === 'rolled-back') { try { await refresh(); } catch {} }
+        // The server holds the list in memory again: tags and covers of the bots in use are complete now.
+        else watchFacts();
         return;
       }
     }
@@ -469,17 +551,25 @@
     }
   }
 
+  // 못 찾은 그림에 대해 알 수 있는 단서(원인을 가려내는 데 쓴다).
+  function whyText(why) {
+    if (!why) return '';
+    return '\n    단서: 새 창고식 이름 ' + why.storeNames + '장 · 앱 목록에 이름이 남은 것 ' + why.listed + '장 · 이 봇 폴더 안 그림 파일 '
+      + why.folderFiles + '개 · 폴더 방식 봇 ' + (why.packaged ? '예' : '아니오');
+  }
+
   function describeRecheck(checked) {
     const t = checked.totals;
     const lines = [
       '보관된 봇 ' + t.bots + '개, 그림 ' + t.images + '장 확인 (' + ((checked.totalMs || 0) / 1000).toFixed(1) + '초)',
-      '이미 이름표 있음 ' + t.alreadyKept + '장 · 이번에 이름표 붙임 ' + t.added + '장 · 봇 폴더 안에 있음(폴더 방식 봇) ' + t.inFolder + '장 · 어디에도 없음 ' + t.missing + '장'
-        + (t.copied ? ' · 복사 ' + t.copied + '장' : ''),
-      '목록 정보(태그·표지)를 채운 봇 ' + (t.listFilled || 0) + '개',
+      '이미 이름표 있음 ' + t.alreadyKept + '장 · 이번에 이름표 붙임 ' + t.added + '장 · 봇 폴더 안에 있음(폴더 방식 봇) ' + t.inFolder + '장 · 어디에도 없음 ' + t.missing + '장',
+      '이번에 붙인 것 가운데: 모듈 폴더에 있던 것 ' + (t.inModule || 0) + '장 · 앱에서 읽어 사본을 뜬 것 ' + (t.viaApp || 0) + '장'
+        + (t.copied && t.copied !== t.viaApp ? ' · 복사 ' + (t.copied - (t.viaApp || 0)) + '장' : ''),
+      '목록 정보(태그·표지)를 채운 봇 ' + (t.listFilled || 0) + '개 · 들어 있던 폴더를 찾은 봇 ' + (t.foldersFound || 0) + '개',
     ];
     for (const item of (checked.missing || []).slice(0, 10)) {
       lines.push(item.error ? '  확인 실패: ' + (item.name || item.id) + ' — ' + item.error
-        : '  어디에도 없음: ' + (item.name || item.id) + ' ' + item.count + '장 (예: ' + item.examples.slice(0, 2).join(', ') + ')');
+        : '  어디에도 없음: ' + (item.name || item.id) + ' ' + item.count + '장 (예: ' + item.examples.slice(0, 2).join(', ') + ')' + whyText(item.why));
     }
     if ((checked.missing || []).length > 10) lines.push('  … 그 밖에 봇 ' + (checked.missing.length - 10) + '개');
     return lines;
@@ -502,6 +592,7 @@
   $('tabArchived').addEventListener('click', () => { tab = 'archived'; picked = new Set(); render(); });
   $('search').addEventListener('input', render);
   $('sort').addEventListener('change', render);
+  $('folder').addEventListener('change', render);
   try { $('showCovers').checked = localStorage.getItem('bangju.covers') === '1'; } catch {}
   $('showCovers').addEventListener('change', () => {
     try { localStorage.setItem('bangju.covers', $('showCovers').checked ? '1' : '0'); } catch {}

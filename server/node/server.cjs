@@ -4667,7 +4667,7 @@ const bangjuArchive = require('./bangju/archive-routes.cjs').registerBangjuArchi
     revokeSessions: () => sessionLock.revokeAll(),
     databaseBytes: () => kvSize(DB_BLOB_KEY) || 0,
     kv: { has: key => kvGetUpdatedAt(key) !== null, set: kvSet, get: kvGet },
-    activeCharacters: () => dbCache[DB_HEX_KEY]?.characters,
+    activeDatabase: () => dbCache[DB_HEX_KEY],
     logger,
 });
 

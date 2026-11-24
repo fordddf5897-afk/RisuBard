@@ -40,6 +40,8 @@ for t in t1 t2 t3 t8 t12; do
   start BANGJU_ARCHIVE_SETTLE=now && seeded && check "$label" node $t.cjs "$BASE" "$ROOT"; finish
 done
 start BANGJU_ARCHIVE_SETTLE=now && seeded && check "t4 중단 복구와 이어서 하기" env BANGJU_ARCHIVE_SETTLE=now node t4.cjs "$BASE" "$ROOT" $PORT "$LOG"; finish
+start BANGJU_ARCHIVE_SETTLE=now && seeded && check "t14 폴더 기억, 앱을 안 연 상태의 태그·표지" env BANGJU_ARCHIVE_SETTLE=now node t14.cjs "$BASE" "$ROOT" $PORT "$LOG"; finish
+start BANGJU_ARCHIVE_SETTLE_DELAY_MS=1500 && seeded && check "t14 폴더 기억(기본 방식: 나중에 정리)" env BANGJU_ARCHIVE_SETTLE_DELAY_MS=1500 node t14.cjs "$BASE" "$ROOT" $PORT "$LOG"; finish
 start BANGJU_ARCHIVE_SETTLE=now BANGJU_ARCHIVE_TEST_FAIL_RELOAD=1 && seeded && check "t7 정리 실패 때 되돌리기(바로 정리)" node t7.cjs "$BASE" "$ROOT"; finish
 start BANGJU_ARCHIVE_SETTLE_DELAY_MS=2000 && seeded && check "t9 기본 방식(나중에 정리)" node t9.cjs "$BASE" "$ROOT"; finish
 start BANGJU_ARCHIVE_SETTLE_DELAY_MS=1500 BANGJU_ARCHIVE_TEST_FAIL_RELOAD=1 && seeded && check "t9 정리 실패 때 되돌리기(기본 방식)" node t9.cjs "$BASE" "$ROOT" rollback; finish
@@ -59,6 +61,7 @@ if [ -n "$CHROME" ]; then
   fi
   if NODE_PATH="${PUPPETEER_DIR:-$WORK/browser}/node_modules" node -e "require('puppeteer-core')" 2> /dev/null; then
     start BANGJU_ARCHIVE_SETTLE_DELAY_MS=2000 && seeded && check "화면(실제 브라우저)" env NODE_PATH="${PUPPETEER_DIR:-$WORK/browser}/node_modules" CHROME="$CHROME" node page-test.cjs "$BASE" "$WORK/page.png"; finish
+    start BANGJU_ARCHIVE_SETTLE=now && seeded && check "화면의 폴더 보기(실제 브라우저)" env NODE_PATH="${PUPPETEER_DIR:-$WORK/browser}/node_modules" CHROME="$CHROME" node page-folders.cjs "$BASE"; finish
   else SKIPPED=$((SKIPPED + 1)); SUMMARY="$SUMMARY\n  건너뜀  화면(실제 브라우저): puppeteer-core를 받지 못함"; fi
 else SKIPPED=$((SKIPPED + 1)); SUMMARY="$SUMMARY\n  건너뜀  화면(실제 브라우저): Chrome 없음"; fi
 

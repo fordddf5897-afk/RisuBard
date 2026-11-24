@@ -188,10 +188,30 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                     if (!retired.has(key) && OBJECT.test(entry?.object)) retired.set(key, entry.object);
                 }
             }
+            const replicas = readJson(path.join(root, 'index', 'character-asset-replicas.json'))?.characters || {};
+            // Which folder-style bot keeps a copy of which image, and which images a module keeps in its own folder.
+            const replicaOwners = new Map();
+            for (const [owner, record] of Object.entries(replicas)) {
+                for (const entry of Array.isArray(record?.entries) ? record.entries : []) {
+                    if (typeof entry?.key === 'string' && typeof entry.filename === 'string' && !replicaOwners.has(entry.key)) {
+                        replicaOwners.set(entry.key, { owner, filename: entry.filename });
+                    }
+                }
+            }
+            // key -> the file inside modules/<folder>/assets/ ('' when the record does not name one)
+            const moduleFiles = new Map();
+            const modules = readJson(path.join(root, 'index', 'module-asset-replicas.json'))?.modules || {};
+            for (const record of Object.values(modules)) {
+                const directory = typeof record?.directory === 'string' ? path.basename(record.directory) : '';
+                for (const entry of Array.isArray(record?.entries) ? record.entries : []) {
+                    if (typeof entry?.key !== 'string' || moduleFiles.get(entry.key)) continue;
+                    const filename = typeof entry.filename === 'string' ? path.basename(entry.filename) : '';
+                    moduleFiles.set(entry.key, directory && filename ? path.join(root, 'modules', directory, 'assets', filename) : '');
+                }
+            }
             lookup = {
                 manifest: readJson(path.join(root, 'kv', 'manifest.json'))?.entries || {},
-                retired,
-                replicas: readJson(path.join(root, 'index', 'character-asset-replicas.json'))?.characters || {},
+                retired, replicas, replicaOwners, moduleFiles,
             };
         }
         clearTimeout(lookupTimer);
@@ -239,24 +259,85 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
         return { has: () => packaged };
     }
 
+    // An image whose only copy sits in another folder-style bot's folder.
+    function otherBotCopy(id, key) {
+        const copy = assetLookup().replicaOwners.get(key);
+        if (!copy || copy.owner === id || !validId(copy.owner)) return null;
+        try {
+            const file = path.join(root, resolveActiveDirectory(copy.owner), 'assets', path.basename(copy.filename));
+            return fs.existsSync(file) ? file : null;
+        } catch { return null; }
+    }
+
+    // An image a module keeps in its own folder.
+    function moduleCopy(key) {
+        const file = assetLookup().moduleFiles.get(key);
+        try { return file && fs.existsSync(file) ? file : null; } catch { return null; }
+    }
+
+    // The last resort: no file was found in any place this code knows, but the app itself may
+    // still be able to show the image. Then its bytes are kept as a real copy, so "the app
+    // could show it when the bot was archived" always means "the archive has it".
+    function copyThroughApp(key, target) {
+        let bytes = null;
+        try { bytes = kv?.get ? kv.get(key) : null; } catch { bytes = null; }
+        if (!bytes || !bytes.length) return false;
+        if (fs.existsSync(target)) return true;
+        const temporary = path.join(archiveRoot, `.copy-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+        try {
+            fs.writeFileSync(temporary, bytes);
+            fs.renameSync(temporary, target);
+        } finally {
+            try { fs.unlinkSync(temporary); } catch { /* moved into place */ }
+        }
+        return true;
+    }
+
+    // What can be said about images that were not found (shown with the report so the cause can be read off).
+    function describeMissing(names, botFolder) {
+        const { manifest, retired } = assetLookup();
+        let storeNames = 0;
+        let listed = 0;
+        for (const name of names) {
+            if (STORE_FILE.test(name)) storeNames += 1;
+            if (manifest[`assets/${name}`] || retired.has(`assets/${name}`)) listed += 1;
+        }
+        let folderFiles = 0;
+        let packaged = false;
+        try { folderFiles = fs.readdirSync(path.join(botFolder, 'assets')).filter(name => !name.endsWith('.sha256') && !name.endsWith('.bak')).length; } catch { /* no image folder */ }
+        try { packaged = fs.existsSync(path.join(botFolder, 'package.json')); } catch { /* not a package */ }
+        return { storeNames, listed, folderFiles, packaged };
+    }
+
     // `botFolder`: where the bot's own folder is now (it may hold images itself).
     function protectAssets(id, assets, botFolder) {
         const folder = assetLinks(id);
         let saved = 0;
         let copied = 0;
         let inFolder = 0;
+        let inModule = 0;
+        let viaApp = 0;
         const missing = [];
         let own = null;
         for (const name of assets) {
-            const source = assetSourcePath(name);
+            const key = `assets/${name}`;
+            const target = path.join(folder, name);
+            let source = assetSourcePath(name) || otherBotCopy(id, key);
+            let fromModule = false;
             if (!source) {
                 own ||= ownFolderAssets(id, botFolder);
-                if (own.has(`assets/${name}`)) inFolder += 1;
+                // Inside the bot's own folder: it travels with the bot.
+                if (own.has(key)) { inFolder += 1; continue; }
+                source = moduleCopy(key);
+                fromModule = Boolean(source);
+            }
+            if (!source) {
+                fs.mkdirSync(folder, { recursive: true });
+                if (copyThroughApp(key, target)) { saved += 1; copied += 1; viaApp += 1; }
                 else missing.push(name);
                 continue;
             }
             fs.mkdirSync(folder, { recursive: true });
-            const target = path.join(folder, name);
             try { fs.linkSync(source, target); }
             catch (error) {
                 if (error?.code === 'EEXIST') { /* kept from an earlier, interrupted try */ }
@@ -264,8 +345,11 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                 else throw error;
             }
             saved += 1;
+            if (fromModule) inModule += 1;
         }
-        return { protected: saved, missing, copied, inFolder };
+        // An empty folder would read as "this bot's images are kept".
+        if (!saved) { try { fs.rmdirSync(folder); } catch { /* holds names from before, or was never made */ } }
+        return { protected: saved, missing, copied, inFolder, inModule, viaApp, ...(missing.length ? { why: describeMissing(missing, botFolder) } : {}) };
     }
 
     // Gives back any image the app's cleanup removed while the bot was archived.
@@ -356,7 +440,8 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
     // bot and its chats back in the same order.
     // `onProgress({ done, total, name })` after each bot; `pause()` lets other
     // requests (such as the progress display) be answered between bots.
-    async function move({ ids, direction, sidebarOf, onProgress, pause }) {
+    // `orderOf(chaId)`: where the bot sits in the app's folder list ({ folderId, folderName, index } or { index }).
+    async function move({ ids, direction, sidebarOf, orderOf, onProgress, pause }) {
         if (direction !== 'archive' && direction !== 'restore') throw new Error('direction must be archive or restore');
         if (!Array.isArray(ids) || ids.some(id => !validId(id))) throw new Error('Invalid bot ID');
         const unique = [...new Set(ids)];
@@ -387,7 +472,7 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                 failed.push({ id, error: String(error?.message || error) });
             }
         }
-        if (!plan.length) return { moved: [], failed, restoredSidebar: [], assets: { protected: 0, missing: 0, copied: 0, inFolder: 0, returned: 0 }, missing: [] };
+        if (!plan.length) return { moved: [], failed, restoredSidebar: [], restoredOrder: [], assets: { protected: 0, missing: 0, copied: 0, inFolder: 0, inModule: 0, viaApp: 0, returned: 0 }, missing: [] };
 
         fs.mkdirSync(archivedCharacters, { recursive: true });
         fs.mkdirSync(activeCharacters, { recursive: true });
@@ -398,7 +483,8 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
         dropAssetLookup();
         const moved = [];
         const restoredSidebar = [];
-        const assetTotals = { protected: 0, missing: 0, copied: 0, inFolder: 0, returned: 0 };
+        const assetTotals = { protected: 0, missing: 0, copied: 0, inFolder: 0, inModule: 0, viaApp: 0, returned: 0 };
+        const restoredOrder = [];
         // Images that could not be found anywhere, by bot (kept short for the report).
         const missingReport = [];
         const characters = index.characters.slice();
@@ -420,9 +506,13 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                     assetTotals.missing += kept.missing.length;
                     assetTotals.copied += kept.copied;
                     assetTotals.inFolder += kept.inFolder;
+                    assetTotals.inModule += kept.inModule;
+                    assetTotals.viaApp += kept.viaApp;
+                    // Which app folder the bot sits in, so a restore can put it back there.
+                    details.order = orderOf ? orderOf(details.summary.chaId) : null;
                     if (kept.missing.length) {
                         details.missing = kept.missing;
-                        if (missingReport.length < 200) missingReport.push({ id: entry.id, name: shownName, count: kept.missing.length, examples: kept.missing.slice(0, 5) });
+                        if (missingReport.length < 200) missingReport.push({ id: entry.id, name: shownName, count: kept.missing.length, examples: kept.missing.slice(0, 5), why: kept.why });
                     }
                 }
                 fs.renameSync(entry.from, entry.to);
@@ -430,6 +520,7 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                     characters.push({
                         id: entry.id, ...details.summary, archivedAt: Date.now(),
                         ...(details.missing ? { missingAssets: details.missing.length } : {}),
+                        ...(details.order ? { order: details.order } : {}),
                         ...(listed ? { position: listed.position, sidebar: listed.entry } : {}),
                     });
                     atomicWriteJson(path.join(referencesRoot, `${entry.id}.json`), {
@@ -441,6 +532,7 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                         const [removed] = characters.splice(at, 1);
                         shownName = removed.name || entry.folderName;
                         if (removed.sidebar) restoredSidebar.push({ position: removed.position ?? Infinity, entry: removed.sidebar });
+                        if (removed.order && removed.chaId) restoredOrder.push({ chaId: removed.chaId, order: removed.order });
                     }
                     fs.rmSync(path.join(referencesRoot, `${entry.id}.json`), { force: true });
                     assetTotals.returned += returnAssets(entry.id).returned;
@@ -459,15 +551,15 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
         saveIndex();
         fs.rmSync(journalPath, { force: true });
         dropAssetLookup();
-        return { moved, failed, restoredSidebar, assets: assetTotals, missing: missingReport };
+        return { moved, failed, restoredSidebar, restoredOrder, assets: assetTotals, missing: missingReport };
     }
 
     // Looks again for the images of archived bots that have no archive name yet:
     // bots archived by an earlier version, which searched fewer places. It only
     // adds names; nothing is moved or removed.
-    async function recheck({ onProgress, pause } = {}) {
+    async function recheck({ onProgress, pause, orderOf } = {}) {
         const index = reconcileIndex();
-        const totals = { bots: index.characters.length, images: 0, alreadyKept: 0, added: 0, copied: 0, inFolder: 0, missing: 0, listFilled: 0, listsRebuilt: 0 };
+        const totals = { bots: index.characters.length, images: 0, alreadyKept: 0, added: 0, copied: 0, inFolder: 0, inModule: 0, viaApp: 0, missing: 0, listFilled: 0, listsRebuilt: 0, foldersFound: 0 };
         const report = [];
         let changed = false;
         let step = 0;
@@ -475,6 +567,12 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
         for (const entry of index.characters) {
             step += 1;
             try {
+                // Bots archived by an earlier version do not know their app folder. While the app's
+                // folder list still names them, it can be read from there.
+                if (!entry.order && orderOf && entry.chaId) {
+                    const order = orderOf(entry.chaId);
+                    if (order) { entry.order = order; if (order.folderId) totals.foldersFound += 1; changed = true; }
+                }
                 // Bots archived by an earlier version have no tags or cover name in the list yet.
                 if (entry.image === undefined) {
                     Object.assign(entry, listFacts(JSON.parse(fs.readFileSync(path.join(archivedCharacters, entry.directory, 'metadata.json'), 'utf8'))));
@@ -501,6 +599,8 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                     totals.added += found.protected;
                     totals.copied += found.copied;
                     totals.inFolder += found.inFolder;
+                    totals.inModule += found.inModule;
+                    totals.viaApp += found.viaApp;
                     totals.missing += found.missing.length;
                     if ((entry.missingAssets || 0) !== found.missing.length || found.protected) {
                         if (found.missing.length) entry.missingAssets = found.missing.length;
@@ -509,7 +609,7 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                         changed = true;
                     }
                     if (found.missing.length && report.length < 200) {
-                        report.push({ id: entry.id, name: entry.name || entry.directory, count: found.missing.length, examples: found.missing.slice(0, 5) });
+                        report.push({ id: entry.id, name: entry.name || entry.directory, count: found.missing.length, examples: found.missing.slice(0, 5), why: found.why });
                     }
                 }
             } catch (error) {
