@@ -41,6 +41,8 @@
     )
     const activeFolderInfo = $derived(folders.find((item) => item.id === activeFolder))
     let editingFolder = $state<string | null>(null)
+    // On touch screens the chips stick right under the header, so they need its height.
+    let headerHeight = $state(0)
 
     const shown = $derived(sortWorks(
         filterWorks(filterByFolder(works, DBState.db.characterOrder, activeFolder), { query, tag: activeTag }),
@@ -92,7 +94,7 @@
 </script>
 
 <div class="h-full w-full overflow-y-auto overscroll-contain" data-easy-home>
-    <header class="sticky top-0 z-10 border-b border-darkborderc bg-bgcolor/95 backdrop-blur-sm">
+    <header class="easy-top sticky top-0 z-10 bg-bgcolor/95 backdrop-blur-sm" bind:clientHeight={headerHeight}>
         <div class="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4">
             <h1 class="text-lg font-bold tracking-tight">작품</h1>
             <button type="button" class="flex h-10 w-10 items-center justify-center rounded-full text-textcolor2 hover:bg-selected hover:text-textcolor" aria-label="기존 화면으로" title="기존 화면으로" data-easy-open-classic onclick={() => setEasyModeEnabled(false)}>
@@ -123,7 +125,18 @@
                     </button>
                 {/if}
             </label>
-            <div class="no-scrollbar -mx-4 mt-3 flex gap-2 overflow-x-auto px-4" role="group" aria-label="폴더" data-easy-folders>
+        </div>
+    </header>
+
+    <!-- Folder and tag chips. The rows wrap onto as many lines as they need and scroll away
+         with the page. On touch screens each row is one line to swipe and stays under the header. -->
+    <div class="easy-filters bg-bgcolor/95 backdrop-blur-sm" style:top="{headerHeight}px" data-easy-filters>
+        <div class="mx-auto max-w-6xl px-4 pb-3">
+            <div class="easy-chip-row no-scrollbar -mx-4 flex gap-2 px-4" role="group" aria-label="폴더" data-easy-folders>
+                <!-- First, so it is always in reach however many folders follow. -->
+                <button type="button" class="easy-chip easy-chip--add" data-easy-folder-add onclick={addFolder}>
+                    <FolderPlusIcon size={14} class="-mt-0.5 mr-1 inline" />새 폴더
+                </button>
                 {#if folders.length}
                     <button type="button" class="easy-chip" class:is-active={activeFolder === null} data-easy-folder="*" onclick={() => selectFolder(null)}>모든 폴더</button>
                     {#each folders as item (item.id)}
@@ -137,12 +150,9 @@
                         </button>
                     {/if}
                 {/if}
-                <button type="button" class="easy-chip easy-chip--add" data-easy-folder-add onclick={addFolder}>
-                    <FolderPlusIcon size={14} class="-mt-0.5 mr-1 inline" />새 폴더
-                </button>
             </div>
             {#if tags.length}
-                <div class="no-scrollbar -mx-4 mt-3 flex gap-2 overflow-x-auto px-4" role="group" aria-label="태그">
+                <div class="easy-chip-row no-scrollbar -mx-4 mt-3 flex gap-2 px-4" role="group" aria-label="태그" data-easy-tags>
                     <button type="button" class="easy-chip" class:is-active={activeTag === null} onclick={() => { activeTag = null }}>전체</button>
                     {#each tags as item (item.tag)}
                         <button type="button" class="easy-chip" class:is-active={activeTag === item.tag} onclick={() => { activeTag = activeTag === item.tag ? null : item.tag }}>
@@ -152,7 +162,7 @@
                 </div>
             {/if}
         </div>
-    </header>
+    </div>
 
     <main class="mx-auto max-w-6xl px-4 pb-16">
         {#if !searching && activeFolder === null && recent.length}
@@ -256,6 +266,34 @@
     .easy-chip--add {
         border-style: dashed;
         background: transparent;
+    }
+    /* Chips wrap by default, so every folder and tag can be reached with any kind of pointer,
+       and they scroll away with the page: only the title and the search box stay on top. */
+    .easy-top {
+        border-bottom: 1px solid var(--color-darkborderc);
+    }
+    .easy-filters {
+        padding-top: 0.75rem;
+    }
+    .easy-chip-row {
+        flex-wrap: wrap;
+    }
+    /* A finger can swipe a row sideways. There each row is a single line, and the rows stay
+       under the header while the page scrolls. */
+    @media (hover: none) and (pointer: coarse) {
+        .easy-top {
+            border-bottom: 0;
+        }
+        .easy-filters {
+            position: sticky;
+            z-index: 9;
+            padding-top: 0;
+            border-bottom: 1px solid var(--color-darkborderc);
+        }
+        .easy-chip-row {
+            flex-wrap: nowrap;
+            overflow-x: auto;
+        }
     }
     .no-scrollbar {
         scrollbar-width: none;

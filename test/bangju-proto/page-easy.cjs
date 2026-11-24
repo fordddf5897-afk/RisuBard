@@ -6,7 +6,7 @@
 // 사용: node page-easy.cjs <base> <root>   (서버는 BANGJU_ARCHIVE_SETTLE=now, seed2 자료 240개)
 const fs = require('node:fs'); const path = require('node:path');
 const puppeteer = require('puppeteer-core');
-const { client } = require('./h.cjs');
+const { client, serverHash } = require('./h.cjs');
 const [base, root] = process.argv.slice(2);
 const ok = (label, pass, detail = '') => { console.log(`${pass ? 'PASS' : 'FAIL'}  ${label}${detail ? '  — ' + detail : ''}`); if (!pass) process.exitCode = 1; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -64,7 +64,7 @@ async function until(check, ms = 20000) { const end = Date.now() + ms; for (;;) 
     ok('ticking works in the folder editor puts them in at once', ticked === 'Bot 0003,Bot 0005,Bot 0007', ticked);
     await closeSheet();
     const afterCreate = await chips();
-    ok('the home shows the folder with its count, and the rest as "폴더 없음"', afterCreate === '모든 폴더 | 판타지 3 | 폴더 없음 237 | 새 폴더' && await cards() === 3 && await cardNames() === 'Bot 0003,Bot 0005,Bot 0007', `${afterCreate} / cards ${await cards()}`);
+    ok('the home shows the folder with its count, and the rest as "폴더 없음"', afterCreate === '새 폴더 | 모든 폴더 | 판타지 3 | 폴더 없음 237' && await cards() === 3 && await cardNames() === 'Bot 0003,Bot 0005,Bot 0007', `${afterCreate} / cards ${await cards()}`);
     const written = await until(() => savedFolder('판타지')?.data.length === 3 && savedFolder('판타지'));
     ok('it is RisuAI\'s own folder list that was written', !!written && typeof written.id === 'string' && written.id.length > 8 && written.color === 'default', JSON.stringify(written && { name: written.name, works: written.data.length }));
 
@@ -95,7 +95,7 @@ async function until(check, ms = 20000) { const end = Date.now() + ms; for (;;) 
     await sleep(300);
     await closeSheet();
     const afterEdit = await chips();
-    ok('renaming and unticking a work are applied', onlyInside === 3 && afterEdit === '모든 폴더 | 모험 2 | 폴더 없음 238 | 새 폴더', `${afterEdit} / shown as inside: ${onlyInside}`);
+    ok('renaming and unticking a work are applied', onlyInside === 3 && afterEdit === '새 폴더 | 모든 폴더 | 모험 2 | 폴더 없음 238', `${afterEdit} / shown as inside: ${onlyInside}`);
 
     // the work page moves a work into a folder
     await page.click('[data-easy-folder="*"]');
@@ -124,7 +124,7 @@ async function until(check, ms = 20000) { const end = Date.now() + ms; for (;;) 
     ok('the archive list knew the folder made in easy mode', list.folders.some(item => item.id === folderId && item.name === '모험') && inFolder.length === 3 && archived.json.moved.length === 2, `in folder ${inFolder.length}, archived ${archived.json.moved?.length}`);
     ok('the app opens again after the archive', await open());
     const dropped = await until(async () => (await chips()).includes('모험 1') && chips(), 15000);
-    ok('the app shows the folder with the one work that stayed', String(dropped).startsWith('모든 폴더 | 모험 1 | 폴더 없음 '), String(dropped));
+    ok('the app shows the folder with the one work that stayed', String(dropped).startsWith('새 폴더 | 모든 폴더 | 모험 1 | 폴더 없음 '), String(dropped));
     await until(() => savedFolder('모험')?.data.length === 1, 20000);
     const api2 = await client(base).login();
     const restored = await api2.post('/api/bangju/archive/move', { ids: leaving, direction: 'restore' });
@@ -148,6 +148,53 @@ async function until(check, ms = 20000) { const end = Date.now() + ms; for (;;) 
     ok('deleting a folder removes only the folder', afterDelete === '새 폴더' && await cards() === 60, `${afterDelete} / cards ${await cards()}`);
     const gone = await until(() => !savedFolder('모험') && savedOrder().length, 20000);
     ok('every work is still in the list on the server', gone === 240, `entries ${gone}`);
+
+    // many folders: the rows wrap so every chip can be reached with a mouse; on a touch screen each row is one line to swipe
+    const api3 = await client(base).login();
+    const read3 = await api3.readDb();
+    const all = read3.db.characters.map(character => character.chaId);
+    const many = Array.from({ length: 16 }, (_, i) => ({ id: `many-${i}`, name: `원작 있는 다인 시뮬챗 ${i + 1}`, color: 'default', data: [all[i]] }));
+    const tagged = read3.db.characters.slice(0, 40).map((character, i) => ({ op: 'replace', path: `/characters/${i}/tags`, value: [`태그 ${String(i).padStart(2, '0')}`, '공통'] }));
+    const patched = await api3.patchDb([{ op: 'replace', path: '/characterOrder', value: [...many, ...all.slice(16)] }, ...tagged], serverHash(read3.db));
+    const rowShape = () => page.evaluate(() => Object.fromEntries(['folders', 'tags'].map(name => {
+        const row = document.querySelector(`[data-easy-${name}]`);
+        const buttons = [...row.querySelectorAll('button')];
+        const last = buttons.at(-1).getBoundingClientRect();
+        return [name, {
+            chips: buttons.length,
+            overflow: row.scrollWidth - row.clientWidth > 1,
+            lines: new Set(buttons.map(button => Math.round(button.getBoundingClientRect().top))).size,
+            lastInView: last.left >= 0 && last.right <= window.innerWidth,
+            first: buttons[0].textContent.trim(),
+        }];
+    }).concat([['filters', getComputedStyle(document.querySelector('[data-easy-filters]')).position]])));
+    await page.setViewport({ width: 1280, height: 900 });
+    ok('the app opens at desktop size', patched.status === 200 && await open());
+    await page.waitForSelector('[data-easy-tags]', { timeout: 10000 });
+    const mouse = await rowShape();
+    await page.screenshot({ path: path.join(process.env.SHOTS || '/tmp', 'easy-home-desktop.png') });
+    ok('without a touch screen the folder row wraps: "새 폴더" is first and every folder can be reached', mouse.folders.first === '새 폴더' && mouse.folders.chips === 19
+        && !mouse.folders.overflow && mouse.folders.lines > 1 && mouse.folders.lastInView, JSON.stringify(mouse.folders));
+    ok('the tag row wraps too, and the chips scroll away with the page', !mouse.tags.overflow && mouse.tags.lines > 1 && mouse.tags.lastInView && mouse.filters === 'static', JSON.stringify({ tags: mouse.tags, filters: mouse.filters }));
+    await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    ok('the app opens at phone size with touch', await open());
+    await page.waitForSelector('[data-easy-tags]', { timeout: 10000 });
+    const touch = await rowShape();
+    ok('on a touch screen each row stays one line to swipe, under the header, with "새 폴더" first', touch.folders.first === '새 폴더' && touch.folders.overflow && touch.folders.lines === 1
+        && touch.tags.overflow && touch.tags.lines === 1 && touch.filters === 'sticky', JSON.stringify(touch));
+    const stuck = await page.evaluate(async () => {
+        const scroller = document.querySelector('[data-easy-home]');
+        scroller.scrollTop = 600;
+        await new Promise(resolve => setTimeout(resolve, 300));
+        const header = document.querySelector('header').getBoundingClientRect();
+        const filters = document.querySelector('[data-easy-filters]').getBoundingClientRect();
+        scroller.scrollTop = 0;
+        return { headerTop: Math.round(header.top), gap: Math.round(filters.top - header.bottom) };
+    });
+    ok('after scrolling, the header and the chips are still at the top, one under the other', stuck.headerTop === 0 && Math.abs(stuck.gap) <= 1, JSON.stringify(stuck));
+    // back to a plain narrow window (changing touch emulation reloads the page)
+    await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 2 });
+    ok('the app opens again in a narrow window', await open());
 
     // E3 and the archive link in easy-mode settings
     await page.evaluate(() => document.querySelector('button[aria-label="간편 모드 설정"]').click());
