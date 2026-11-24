@@ -1,7 +1,7 @@
 <script lang="ts">
-    import { ArchiveRestoreIcon, CheckIcon, ChevronRightIcon, DownloadIcon, ImageIcon, LayoutPanelLeftIcon, SettingsIcon, SparklesIcon, UploadIcon } from '@lucide/svelte'
+    import { ArchiveIcon, ArchiveRestoreIcon, CheckIcon, ChevronRightIcon, DownloadIcon, ExternalLinkIcon, ImageIcon, LayoutPanelLeftIcon, PlugIcon, PuzzleIcon, SettingsIcon, SparklesIcon, UploadIcon } from '@lucide/svelte'
     import { DBState, OtherBotsSubmenuIndex } from 'src/ts/stores.svelte'
-    import { easyPrefs, saveEasyPrefs, setEasyModeEnabled } from 'src/ts/easyMode/state.svelte'
+    import { ARCHIVE_PATH, archiveAvailable, easyPrefs, saveEasyPrefs, setEasyModeEnabled } from 'src/ts/easyMode/state.svelte'
     import { importAppSkinFile, installAppSkinFromText, isAppSkinSuppressed, listAppSkins, selectAppSkin } from 'src/ts/gui/appSkinRuntime'
     import { appSkinSwatch, defaultAppSkinSwatch } from 'src/ts/gui/appSkinSwatch'
     import { openSettings, SettingsRoute } from 'src/ts/routing'
@@ -40,11 +40,21 @@
 <div class="mx-auto flex max-w-2xl flex-col gap-8 p-4 pb-12">
     <section aria-labelledby="easy-full-title">
         <h3 id="easy-full-title" class="text-base font-bold">전체 설정</h3>
-        <p class="mt-1 text-sm text-textcolor2">AI 연결(모델·API 키), 기존 리스 데이터 가져오기 같은 설정은 RisuBard 전체 설정에 있어요. 닫으면 간편 모드로 돌아와요.</p>
+        <p class="mt-1 text-sm text-textcolor2">AI 연결(모델·API 키), 모듈·플러그인 관리, 기존 리스 데이터 가져오기 같은 설정은 RisuBard 전체 설정에 있어요. 닫으면 간편 모드로 돌아와요.</p>
         <div class="mt-3 flex flex-col overflow-hidden rounded-xl border border-darkborderc bg-darkbg">
             <button type="button" class="easy-link" data-easy-open-ai onclick={() => openSettings(SettingsRoute.ModelPreset)}>
                 <SparklesIcon size={18} class="shrink-0 text-textcolor2" />
                 <span class="min-w-0 flex-1">AI 연결 · 모델 · API 키</span>
+                <ChevronRightIcon size={16} class="shrink-0 text-textcolor2" />
+            </button>
+            <button type="button" class="easy-link" data-easy-open-modules onclick={() => openSettings(SettingsRoute.Module)}>
+                <PuzzleIcon size={18} class="shrink-0 text-textcolor2" />
+                <span class="min-w-0 flex-1">모듈 관리</span>
+                <ChevronRightIcon size={16} class="shrink-0 text-textcolor2" />
+            </button>
+            <button type="button" class="easy-link" data-easy-open-plugins onclick={() => openSettings(SettingsRoute.Plugin)}>
+                <PlugIcon size={18} class="shrink-0 text-textcolor2" />
+                <span class="min-w-0 flex-1">플러그인 관리</span>
                 <ChevronRightIcon size={16} class="shrink-0 text-textcolor2" />
             </button>
             <button type="button" class="easy-link" data-easy-open-migration onclick={() => openSettings(SettingsRoute.Migration)}>
@@ -59,6 +69,20 @@
             </button>
         </div>
     </section>
+
+    {#if archiveAvailable}
+        <section aria-labelledby="easy-archive-title">
+            <h3 id="easy-archive-title" class="text-base font-bold">보관함</h3>
+            <p class="mt-1 text-sm text-textcolor2">안 쓰는 작품을 보관함으로 옮기면 앱이 가벼워져요. 채팅과 그림도 같이 보관되고, 불러오면 원래 폴더로 돌아와요. 새 창에서 열려요.</p>
+            <div class="mt-3 flex flex-col overflow-hidden rounded-xl border border-darkborderc bg-darkbg">
+                <a class="easy-link" data-easy-open-archive href={ARCHIVE_PATH} target="_blank" rel="noopener">
+                    <ArchiveIcon size={18} class="shrink-0 text-textcolor2" />
+                    <span class="min-w-0 flex-1">보관함 관리</span>
+                    <ExternalLinkIcon size={16} class="shrink-0 text-textcolor2" />
+                </a>
+            </div>
+        </section>
+    {/if}
 
     <section aria-labelledby="easy-skin-title">
         <h3 id="easy-skin-title" class="text-base font-bold">앱 스킨</h3>

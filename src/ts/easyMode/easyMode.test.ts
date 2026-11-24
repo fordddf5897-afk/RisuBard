@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'vitest'
-import { parseEasyPrefs, urlModeOverride, defaultEasyPrefs } from './state.svelte'
+import { parseEasyPrefs, urlModeOverride, defaultEasyPrefs, registerArchiveEntry, ARCHIVE_PATH } from './state.svelte'
+import { additionalHamburgerMenu, additionalSettingsMenu } from '../stores.svelte'
+import { LIST_PAGE, nextLimit } from './visible'
 import { shouldIllustrate, wholeMessageAnchor } from './autoIllustrate'
 import { saveSlotModeFrom } from './events'
 import { validateAppSkin } from '../gui/appSkin'
@@ -57,4 +59,30 @@ test('the bundled garden skin passes the app skin validator', () => {
     const result = validateAppSkin(gardenSkin)
     expect(result.errors).toEqual([])
     expect(result.ok).toBe(true)
+})
+
+describe('archive entry on the classic screen', () => {
+    test('is added once to the sidebar menu and the settings navigation, only where the archive page exists', () => {
+        const count = () => [additionalHamburgerMenu, additionalSettingsMenu].map((menu) => menu.filter((item) => item.name === '보관함 관리').length)
+        const before = count()
+        registerArchiveEntry(false)
+        expect(count()).toEqual(before)
+        registerArchiveEntry(true)
+        registerArchiveEntry(true)
+        expect(count()).toEqual([1, 1])
+        expect(ARCHIVE_PATH).toBe('/bangju/archive')
+        const entry = additionalHamburgerMenu.find((item) => item.name === '보관함 관리')
+        expect(entry?.pluginName).toBe('easy-mode')
+        expect(entry?.layoutKey).toBe('sidebar')
+    })
+})
+
+describe('drawing a long list a page at a time', () => {
+    test('adds one page and never goes past the end', () => {
+        expect(nextLimit(LIST_PAGE, 1000)).toBe(LIST_PAGE * 2)
+        expect(nextLimit(LIST_PAGE, LIST_PAGE + 5)).toBe(LIST_PAGE + 5)
+        expect(nextLimit(0, 10, 4)).toBe(4)
+        expect(nextLimit(8, 10, 4)).toBe(10)
+        expect(nextLimit(10, 0)).toBe(0)
+    })
 })
