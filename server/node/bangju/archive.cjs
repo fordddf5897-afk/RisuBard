@@ -190,12 +190,24 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
     }
 
     // Images a folder-style (V3) bot keeps inside its own folder travel with it.
-    function ownFolderAssets(id) {
+    // The app's list of those copies names them exactly. Once a bot is archived the
+    // app may have dropped it from that list; then a package folder that holds
+    // image files is taken as holding them (`folder` is the bot's folder).
+    function ownFolderAssets(id, folder) {
         const entries = assetLookup().replicas[id]?.entries;
-        return new Set(Array.isArray(entries) ? entries.map(entry => entry?.key).filter(Boolean) : []);
+        if (Array.isArray(entries)) return { has: key => entries.some(entry => entry?.key === key) };
+        let packaged = false;
+        if (folder) {
+            try {
+                packaged = fs.existsSync(path.join(folder, 'package.json'))
+                    && fs.readdirSync(path.join(folder, 'assets')).some(name => !name.endsWith('.sha256'));
+            } catch { /* no images inside the folder */ }
+        }
+        return { has: () => packaged };
     }
 
-    function protectAssets(id, assets) {
+    // `botFolder`: where the bot's own folder is now (it may hold images itself).
+    function protectAssets(id, assets, botFolder) {
         const folder = assetLinks(id);
         let saved = 0;
         let copied = 0;
@@ -205,7 +217,7 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
         for (const name of assets) {
             const source = assetSourcePath(name);
             if (!source) {
-                own ||= ownFolderAssets(id);
+                own ||= ownFolderAssets(id, botFolder);
                 if (own.has(`assets/${name}`)) inFolder += 1;
                 else missing.push(name);
                 continue;
@@ -368,7 +380,7 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                     listed = sidebarOf ? sidebarOf(entry.id) : null;
                     // Before the folder moves: an interruption leaves only spare names behind.
                     shownName = details.summary.name || entry.folderName;
-                    const kept = protectAssets(entry.id, details.assets);
+                    const kept = protectAssets(entry.id, details.assets, entry.from);
                     assetTotals.protected += kept.protected;
                     assetTotals.missing += kept.missing.length;
                     assetTotals.copied += kept.copied;
@@ -415,6 +427,54 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
         return { moved, failed, restoredSidebar, assets: assetTotals, missing: missingReport };
     }
 
+    // Looks again for the images of archived bots that have no archive name yet:
+    // bots archived by an earlier version, which searched fewer places. It only
+    // adds names; nothing is moved or removed.
+    async function recheck({ onProgress, pause } = {}) {
+        const index = reconcileIndex();
+        const totals = { bots: index.characters.length, images: 0, alreadyKept: 0, added: 0, copied: 0, inFolder: 0, missing: 0 };
+        const report = [];
+        let changed = false;
+        let step = 0;
+        dropAssetLookup();
+        for (const entry of index.characters) {
+            step += 1;
+            try {
+                const referencesPath = path.join(referencesRoot, `${entry.id}.json`);
+                const assets = readJson(referencesPath)?.assets;
+                const names = Array.isArray(assets) ? assets : [];
+                let kept = new Set();
+                try { kept = new Set(fs.readdirSync(assetLinks(entry.id))); } catch { /* nothing kept yet */ }
+                const waiting = names.filter(name => !kept.has(name));
+                totals.images += names.length;
+                totals.alreadyKept += names.length - waiting.length;
+                if (waiting.length) {
+                    const found = protectAssets(entry.id, waiting, path.join(archivedCharacters, entry.directory));
+                    totals.added += found.protected;
+                    totals.copied += found.copied;
+                    totals.inFolder += found.inFolder;
+                    totals.missing += found.missing.length;
+                    if ((entry.missingAssets || 0) !== found.missing.length || found.protected) {
+                        if (found.missing.length) entry.missingAssets = found.missing.length;
+                        else delete entry.missingAssets;
+                        atomicWriteJson(referencesPath, { schemaVersion: 1, assets: names, ...(found.missing.length ? { missing: found.missing } : {}) });
+                        changed = true;
+                    }
+                    if (found.missing.length && report.length < 200) {
+                        report.push({ id: entry.id, name: entry.name || entry.directory, count: found.missing.length, examples: found.missing.slice(0, 5) });
+                    }
+                }
+            } catch (error) {
+                if (report.length < 200) report.push({ id: entry.id, name: entry.name || entry.directory, error: String(error?.message || error) });
+            }
+            if (onProgress) onProgress({ done: step, total: index.characters.length, name: entry.name || entry.directory });
+            if (pause && step % 20 === 0) await pause();
+        }
+        if (changed) atomicWriteJson(indexPath, { schemaVersion: 1, updatedAt: Date.now(), characters: index.characters });
+        dropAssetLookup();
+        return { totals, missing: report };
+    }
+
     // Asset file names that archived bots still need.
     function referencedAssets() {
         const names = new Set();
@@ -425,7 +485,7 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
         return names;
     }
 
-    return { archiveRoot, listArchived, move, recover, pendingBatch, clearPendingBatch, referencedAssets };
+    return { archiveRoot, listArchived, move, recover, recheck, pendingBatch, clearPendingBatch, referencedAssets };
 }
 
 module.exports = { ARCHIVE_DIRECTORY, createBangjuArchive };

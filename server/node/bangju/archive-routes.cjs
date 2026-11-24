@@ -135,6 +135,7 @@ function registerBangjuArchiveRoutes(app, {
             settle: { ...settleState, bots: unsettled.reduce((total, batch) => total + batch.ids.length, 0) },
             last: recall('last-run.json'),
             lastSettle: recall('last-settle.json'),
+            lastRecheck: recall('last-recheck.json'),
             interrupted,
         });
     });
@@ -263,6 +264,35 @@ function registerBangjuArchiveRoutes(app, {
         } catch (error) {
             logger?.error?.('[Bangju archive] Settle failed', error);
             res.status(500).json({ status: 'failed', error: String(error?.message || error) });
+        }
+    });
+
+    // 보관된 봇의 그림 가운데 아직 보관함 이름표가 없는 것을 다시 찾아본다. 이름표를
+    // 더할 뿐이고 아무것도 옮기거나 지우지 않는다. 예전 버전으로 보관한 봇을 위한 것.
+    app.post('/api/bangju/archive/recheck', async (req, res) => {
+        if (!await auth(req, res)) return;
+        const receivedAt = performance.now();
+        let mine = null;
+        queued += 1;
+        try {
+            const checked = await queue(async () => {
+                mine = { direction: 'recheck', total: 0, done: 0, current: '', startedAt: new Date().toISOString() };
+                running = mine;
+                return archive.recheck({
+                    onProgress: progress => { mine.total = progress.total; mine.done = progress.done; mine.current = progress.name; },
+                    pause: () => new Promise(resolve => setImmediate(resolve)),
+                });
+            });
+            const result = { ...checked, totalMs: elapsed(receivedAt), finishedAt: new Date().toISOString() };
+            remember('last-recheck.json', result);
+            logger?.info?.(`[Bangju archive] recheck ${JSON.stringify(result.totals)} in ${result.totalMs}ms`);
+            res.json(result);
+        } catch (error) {
+            logger?.error?.('[Bangju archive] Recheck failed', error);
+            res.status(500).json({ error: String(error?.message || error) });
+        } finally {
+            queued -= 1;
+            if (mine && running === mine) running = null;
         }
     });
 

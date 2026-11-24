@@ -74,6 +74,12 @@
     <div class="actions"><button id="resumeButton" class="primary">이어서 하기</button><button id="dismissButton">그만두기</button></div>
   </div>
   <div class="box"><pre id="result">아직 옮긴 것이 없습니다.</pre></div>
+  <details class="box">
+    <summary>보관된 봇의 그림 다시 확인</summary>
+    <p class="note">보관함에 있는 봇의 그림 가운데 아직 보호 이름표가 없는 것을 다시 찾아봅니다. 이름표를 더할 뿐이고 아무것도 옮기거나 지우지 않습니다. 봇이 많으면 1분쯤 걸립니다.</p>
+    <button id="recheckButton">다시 확인하기</button>
+    <pre id="recheckResult"></pre>
+  </details>
 </div>
 
 <script>
@@ -336,6 +342,32 @@
     }
   }
 
+  function describeRecheck(checked) {
+    const t = checked.totals;
+    const lines = [
+      '보관된 봇 ' + t.bots + '개, 그림 ' + t.images + '장 확인 (' + ((checked.totalMs || 0) / 1000).toFixed(1) + '초)',
+      '이미 이름표 있음 ' + t.alreadyKept + '장 · 이번에 이름표 붙임 ' + t.added + '장 · 봇 폴더 안에 있음(폴더 방식 봇) ' + t.inFolder + '장 · 어디에도 없음 ' + t.missing + '장'
+        + (t.copied ? ' · 복사 ' + t.copied + '장' : ''),
+    ];
+    for (const item of (checked.missing || []).slice(0, 10)) {
+      lines.push(item.error ? '  확인 실패: ' + (item.name || item.id) + ' — ' + item.error
+        : '  어디에도 없음: ' + (item.name || item.id) + ' ' + item.count + '장 (예: ' + item.examples.slice(0, 2).join(', ') + ')');
+    }
+    if ((checked.missing || []).length > 10) lines.push('  … 그 밖에 봇 ' + (checked.missing.length - 10) + '개');
+    return lines;
+  }
+
+  async function recheck() {
+    if (busy) return;
+    busy = true; count();
+    $('recheckButton').disabled = true;
+    $('recheckResult').textContent = '확인하는 중입니다…';
+    try { $('recheckResult').textContent = describeRecheck(await call('/api/bangju/archive/recheck', {})).join('\n'); }
+    catch (error) { $('recheckResult').textContent = '실패: ' + error.message; }
+    finally { busy = false; count(); $('recheckButton').disabled = false; try { await refresh(); } catch {} }
+  }
+
+  $('recheckButton').addEventListener('click', recheck);
   $('loginButton').addEventListener('click', login);
   $('password').addEventListener('keydown', event => { if (event.key === 'Enter') login(); });
   $('tabActive').addEventListener('click', () => { tab = 'active'; picked = new Set(); render(); });

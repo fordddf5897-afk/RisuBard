@@ -40,6 +40,15 @@ const ok = (label, pass, detail = '') => { console.log(`${pass ? 'PASS' : 'FAIL'
     ok('the list and the reference file remember what was not found', listed.missingAssets === 1 && references.missing[0] === 'gone.png' && references.assets.length === 5);
     ok('the image inside the bot folder moved with it', fs.readFileSync(path.join(root, 'bangju/archive/characters/bot1/assets/own.png'), 'utf8') === 'travels with the folder');
 
+    // A bot archived by the earlier version: the retired image has no archive name. Recheck adds it and changes nothing else.
+    fs.rmSync(path.join(root, 'bangju/archive/assets/bot1/retired.png'));
+    const checked = await archive.recheck();
+    ok('recheck gives the unprotected image its archive name', checked.totals.bots === 1 && checked.totals.images === 5 && checked.totals.alreadyKept === 2 && checked.totals.added === 1
+        && checked.totals.inFolder === 1 && checked.totals.missing === 1 && checked.missing[0].examples[0] === 'gone.png'
+        && fs.statSync(path.join(root, 'bangju/archive/assets/bot1/retired.png')).ino === fs.statSync(path.join(root, 'kv/objects', retiredObject)).ino, JSON.stringify(checked.totals));
+    const again = await archive.recheck();
+    ok('a second recheck finds nothing new to add', again.totals.added === 0 && again.totals.alreadyKept === 3 && again.totals.missing === 1, JSON.stringify(again.totals));
+
     // The app drops the retired entry and deletes the object while the bot is archived.
     present.delete('assets/retired.png');
     fs.rmSync(path.join(root, 'kv/objects', retiredObject));

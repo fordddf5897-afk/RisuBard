@@ -70,6 +70,10 @@ async function settled(tab, since) {
     const list2 = (await tab.get('/api/bangju/archive')).json;
     ok('lists follow every move', list2.totals.active === list0.totals.active - 2 && list2.totals.archived === 2 && list2.active.some(x => x.id === b.id) && !list2.active.some(x => x.id === c.id));
 
+    const rechecked = await tab.post('/api/bangju/archive/recheck', {});
+    ok('rechecking the archived bots\' images adds nothing when all are kept', rechecked.status === 200 && rechecked.json.totals.bots === 2 && rechecked.json.totals.added === 0
+        && rechecked.json.totals.missing === 0 && rechecked.json.totals.alreadyKept === rechecked.json.totals.images, JSON.stringify(rechecked.json.totals));
+
     // 3) the server reloads once, a little later
     const s2 = await settled(tab, t0);
     ok('one reload settles all three moves', s2.lastSettle.status === 'done' && s2.lastSettle.adopted === true && s2.lastSettle.bots === 4, JSON.stringify(s2.lastSettle));
