@@ -52,8 +52,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # REHEARSAL: main as it was before RisuBard 0.9.104 was merged, so there is something to merge.
-          ref: ca256b910187c17d58728e93699b4433382528ad
+          # REHEARSAL, second run: main as it is now, so the published result is the true one.
+          ref: ${{ github.event.repository.default_branch }}
 
       # REHEARSAL: that older tree has no update-check tools; take them from this branch, outside the working copy.
       - name: Tools from the rehearsal branch
@@ -104,7 +104,7 @@ jobs:
 
       - name: Trial image names
         id: trial
-        if: (inputs.trial_image || github.event_name == 'push') && steps.check.outputs.status == 'clean' && steps.check.outputs.checks_ok == 'true'
+        if: inputs.trial_image && steps.check.outputs.status == 'clean' && steps.check.outputs.checks_ok == 'true'
         shell: bash
         run: |
           upstream="${{ steps.check.outputs.upstream_sha }}"
@@ -159,6 +159,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash "$RUNNER_TEMP/publish-status.sh" "update check - ${{ steps.check.outputs.status }}" "$RUNNER_TEMP/update-check.json"
+
+      # REHEARSAL: the image main already has (built before the workflow recorded images), written down once
+      # through the same helper, so the screen has it and the two files are seen to live side by side.
+      - name: Record the current main image
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '{"schemaVersion":1,"tag":"sha-cbc5948","commit":"cbc59488bc8ecb06c789a0fcf750f2118f522ea5","version":"0.9.104","builtAt":"2026-11-24T06:54:34Z","runUrl":"https://github.com/fordddf5897-afk/RisuBard/actions/runs/45343303260"}\n' > "$RUNNER_TEMP/main-image.json"
+          bash "$RUNNER_TEMP/publish-status.sh" "main image sha-cbc5948" "$RUNNER_TEMP/main-image.json"
 
       - name: Summary
         shell: bash
