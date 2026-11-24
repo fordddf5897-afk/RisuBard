@@ -35,6 +35,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await page.click('#moveButton');
     await page.waitForFunction(() => /불러오기 2개 완료/.test(document.getElementById('result').innerText), { timeout: 30000 });
     console.log('result after restore:', (await text('#result')).replace(/\n/g, ' / '));
+    // The server reloads its list a little later; the page adds a line when that is done.
+    await page.waitForFunction(() => /목록 정리 완료/.test(document.getElementById('result').innerText), { timeout: 30000 });
+    console.log('after the reload:', (await text('#result')).split('\n').slice(-1)[0]);
     // An expired login token: the server refuses the first move request; the page must renew the token and retry.
     await page.setRequestInterception(true);
     let refused = 0, renewed = 0;

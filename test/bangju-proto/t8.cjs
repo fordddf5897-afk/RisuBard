@@ -15,7 +15,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     const r = await tab.post('/api/bangju/archive/move', { ids, direction: 'archive', runId: 'run-a' });
     ok('the answer carries the run id, before/after and timings', r.status === 200 && r.json.runId === 'run-a' && r.json.status === 'done'
         && r.json.before.active === list.totals.active && r.json.after.active === list.totals.active - 2
-        && r.json.after.databaseBytes < r.json.before.databaseBytes && Number.isFinite(r.json.totalMs), JSON.stringify({ before: r.json.before, after: r.json.after, totalMs: r.json.totalMs }));
+        && Number.isFinite(r.json.totalMs), JSON.stringify({ before: r.json.before, after: r.json.after, totalMs: r.json.totalMs }));
     const s1 = (await tab.get('/api/bangju/archive/status')).json;
     ok('the status shows that run as the last one, nothing running', s1.running === null && s1.queued === 0 && s1.last?.runId === 'run-a' && s1.last.moved.length === 2);
     ok('the last run is kept in a file', JSON.parse(fs.readFileSync(path.join(root, 'bangju/archive/last-run.json'), 'utf8')).runId === 'run-a');

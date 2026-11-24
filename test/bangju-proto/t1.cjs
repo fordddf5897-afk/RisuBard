@@ -26,7 +26,7 @@ const stripOrder = db => Object.fromEntries(db.characters.map(c => [c.chaId, c])
     const before = await tabA.readDb();
     const list0 = (await tabA.get('/api/bangju/archive')).json;
     ok('list before', list0.totals.active === before.db.characters.length && list0.totals.archived === 0,
-        `active ${list0.totals.active}, archived ${list0.totals.archived}, database ${list0.totals.databaseBytes} bytes, list took ${list0.listMs}ms`);
+        `active ${list0.totals.active}, archived ${list0.totals.archived}, database ${list0.totals.storedCopyBytes} bytes, list took ${list0.listMs}ms`);
 
     const withAsset = list0.active.find(c => c.name === 'Bot 0003');
     const targets = [list0.active[0], withAsset, list0.active[list0.active.length - 1]];
@@ -40,7 +40,7 @@ const stripOrder = db => Object.fromEntries(db.characters.map(c => [c.chaId, c])
         JSON.stringify({ status: moved.status, moved: moved.json?.moved?.length, failed: moved.json?.failed, timings: moved.json?.timings, databaseBytes: moved.json?.databaseBytes }));
     ok('folders moved', ids.every(id => !fs.existsSync(folderOf(id)) && fs.existsSync(archivedOf(id))));
     ok('archived folders byte-identical', ids.every(id => treeHash(archivedOf(id)) === hashesBefore[id]));
-    ok('database got smaller', moved.json.databaseBytes < list0.totals.databaseBytes, `${list0.totals.databaseBytes} -> ${moved.json.databaseBytes}`);
+    ok('database got smaller', moved.json.databaseBytes < list0.totals.storedCopyBytes, `${list0.totals.storedCopyBytes} -> ${moved.json.databaseBytes}`);
 
     const tabB = await client(base).login();           // a page opened after the move
     const afterB = await tabB.readDb();

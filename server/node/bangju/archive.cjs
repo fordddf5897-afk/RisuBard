@@ -1,10 +1,16 @@
 'use strict';
-// 방주 보관함 (B1 검증용 시험판)
+// 방주 보관함 (B1)
 //
 // 봇 하나는 characters/<폴더> 하나다. 보관은 그 폴더를 같은 디스크의
 // bangju/archive/characters/<폴더>로 옮기는 일이고, 불러오기는 되돌리는 일이다.
 // 폴더 이름 바꾸기(rename)는 한 번에 끝나므로 봇은 언제나 둘 중 한 곳에만 있다.
 // 서버의 목록을 다시 읽게 하는 일은 archive-routes.cjs가 맡는다.
+//
+// 봇 폴더 밖에 있는 것:
+// - 그림(assets/…)은 앱의 공용 그림 창고에 있다. 아래 '그림 보호'가 지킨다.
+// - 세이브 슬롯, BardWiki, 원고는 risubard/characters/<봇 ID>/… 에 있다. 앱에는
+//   봇이 목록에서 빠졌다고 이것을 지우는 코드가 없어서 그 자리에 그대로 둔다.
+//   불러오면 같은 ID로 다시 이어진다.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -134,33 +140,76 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
     // 시간이 들지 않고, 앱이 원래 이름을 지워도 내용은 남는다.
     const assetLinks = id => path.join(archiveRoot, 'assets', id);
     const STORE_FILE = /^([a-f0-9]{64})\.([a-z0-9]{1,16})$/;
-    let manifestEntries = null;
+    const OBJECT = /^[a-f0-9]{64}$/;
+
+    // The app's own lists of where image bytes live. They can be large, so they
+    // are read once per batch and dropped a little after the last use.
+    let lookup = null;
+    let lookupTimer = null;
+    function assetLookup() {
+        if (!lookup) {
+            const retired = new Map();
+            const retiredIndex = readJson(path.join(root, 'kv', 'retired-assets.json'));
+            for (const keys of Object.values(retiredIndex?.characters || {})) {
+                for (const [key, entry] of Object.entries(keys || {})) {
+                    if (!retired.has(key) && OBJECT.test(entry?.object)) retired.set(key, entry.object);
+                }
+            }
+            lookup = {
+                manifest: readJson(path.join(root, 'kv', 'manifest.json'))?.entries || {},
+                retired,
+                replicas: readJson(path.join(root, 'index', 'character-asset-replicas.json'))?.characters || {},
+            };
+        }
+        clearTimeout(lookupTimer);
+        lookupTimer = setTimeout(() => { lookup = null; }, 60000);
+        lookupTimer.unref?.();
+        return lookup;
+    }
+    function dropAssetLookup() {
+        clearTimeout(lookupTimer);
+        lookup = null;
+    }
 
     // Where the app keeps the bytes of assets/<name>: the asset store keeps a
-    // file named after its content, older assets are objects listed in the manifest.
+    // file named after its content; older assets are objects listed in the
+    // manifest, or in the retired list once a folder-style bot took its own copy.
     function assetSourcePath(name) {
         const stored = STORE_FILE.exec(name);
         if (stored) {
             const file = path.join(root, 'asset-store', stored[1].slice(0, 2), name);
             if (fs.existsSync(file)) return file;
         }
-        if (!manifestEntries) manifestEntries = readJson(path.join(root, 'kv', 'manifest.json'))?.entries || {};
-        const object = manifestEntries[`assets/${name}`]?.object;
-        if (typeof object === 'string' && /^[a-f0-9]{64}$/.test(object)) {
+        const { manifest, retired } = assetLookup();
+        for (const object of [manifest[`assets/${name}`]?.object, retired.get(`assets/${name}`)]) {
+            if (typeof object !== 'string' || !OBJECT.test(object)) continue;
             const file = path.join(root, 'kv', 'objects', object);
             if (fs.existsSync(file)) return file;
         }
         return null;
     }
 
+    // Images a folder-style (V3) bot keeps inside its own folder travel with it.
+    function ownFolderAssets(id) {
+        const entries = assetLookup().replicas[id]?.entries;
+        return new Set(Array.isArray(entries) ? entries.map(entry => entry?.key).filter(Boolean) : []);
+    }
+
     function protectAssets(id, assets) {
         const folder = assetLinks(id);
         let saved = 0;
-        let missing = 0;
         let copied = 0;
+        let inFolder = 0;
+        const missing = [];
+        let own = null;
         for (const name of assets) {
             const source = assetSourcePath(name);
-            if (!source) { missing += 1; continue; }
+            if (!source) {
+                own ||= ownFolderAssets(id);
+                if (own.has(`assets/${name}`)) inFolder += 1;
+                else missing.push(name);
+                continue;
+            }
             fs.mkdirSync(folder, { recursive: true });
             const target = path.join(folder, name);
             try { fs.linkSync(source, target); }
@@ -171,7 +220,7 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
             }
             saved += 1;
         }
-        return { protected: saved, missing, copied };
+        return { protected: saved, missing, copied, inFolder };
     }
 
     // Gives back any image the app's cleanup removed while the bot was archived.
@@ -201,7 +250,10 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
         let changed = kept.length !== index.characters.length;
         for (const folderName of folders) {
             if (known.has(folderName)) continue;
-            const { summary, assets } = summarize(path.join(archivedCharacters, folderName), folderName);
+            let details;
+            try { details = summarize(path.join(archivedCharacters, folderName), folderName); }
+            catch { continue; } // An unreadable folder stays where it is and is left out of the list.
+            const { summary, assets } = details;
             const id = toStableId && summary.chaId ? toStableId(summary.chaId) : folderName;
             kept.push({ id, ...summary, archivedAt: Date.now() });
             atomicWriteJson(path.join(referencesRoot, `${id}.json`), { schemaVersion: 1, assets });
@@ -225,8 +277,27 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
         for (const id of kept) {
             if (!archivedIds.has(id)) returned += returnAssets(id).returned;
         }
-        if (journal) fs.rmSync(journalPath, { force: true });
-        return { interrupted: Boolean(journal), archived: index.characters.length, returnedAssets: returned };
+        dropAssetLookup();
+        // The journal stays while some bots of that batch still wait, so the batch can be continued.
+        const pending = pendingBatch();
+        if (journal && !pending) fs.rmSync(journalPath, { force: true });
+        return { interrupted: Boolean(journal), remaining: pending?.remaining.length ?? 0, archived: index.characters.length, returnedAssets: returned };
+    }
+
+    // A batch that stopped half way (the server went down): the bots that had not moved yet.
+    function pendingBatch() {
+        const journal = readJson(journalPath);
+        if (!journal || !Array.isArray(journal.entries)) return null;
+        const source = journal.direction === 'archive' ? activeCharacters : archivedCharacters;
+        const remaining = journal.entries
+            .filter(entry => validId(entry?.id) && typeof entry.directory === 'string' && isDirectory(path.join(source, path.basename(entry.directory))))
+            .map(entry => entry.id);
+        if (!remaining.length) return null;
+        return { direction: journal.direction, startedAt: journal.startedAt, total: journal.entries.length, remaining };
+    }
+
+    function clearPendingBatch() {
+        fs.rmSync(journalPath, { force: true });
     }
 
     function listArchived() {
@@ -236,7 +307,9 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
     // `sidebarOf(id)`: the bot's entry in the server's list index and its
     // position there ({ position, entry }), remembered so a restore can put the
     // bot and its chats back in the same order.
-    function move({ ids, direction, sidebarOf }) {
+    // `onProgress({ done, total, name })` after each bot; `pause()` lets other
+    // requests (such as the progress display) be answered between bots.
+    async function move({ ids, direction, sidebarOf, onProgress, pause }) {
         if (direction !== 'archive' && direction !== 'restore') throw new Error('direction must be archive or restore');
         if (!Array.isArray(ids) || ids.some(id => !validId(id))) throw new Error('Invalid bot ID');
         const unique = [...new Set(ids)];
@@ -267,7 +340,7 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                 failed.push({ id, error: String(error?.message || error) });
             }
         }
-        if (!plan.length) return { moved: [], failed, restoredSidebar: [], assets: { protected: 0, missing: 0, copied: 0, returned: 0 } };
+        if (!plan.length) return { moved: [], failed, restoredSidebar: [], assets: { protected: 0, missing: 0, copied: 0, inFolder: 0, returned: 0 }, missing: [] };
 
         fs.mkdirSync(archivedCharacters, { recursive: true });
         fs.mkdirSync(activeCharacters, { recursive: true });
@@ -275,12 +348,18 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
             schemaVersion: 1, direction, startedAt: Date.now(),
             entries: plan.map(entry => ({ id: entry.id, directory: entry.folderName })),
         });
-        manifestEntries = null;
+        dropAssetLookup();
         const moved = [];
         const restoredSidebar = [];
-        const assetTotals = { protected: 0, missing: 0, copied: 0, returned: 0 };
+        const assetTotals = { protected: 0, missing: 0, copied: 0, inFolder: 0, returned: 0 };
+        // Images that could not be found anywhere, by bot (kept short for the report).
+        const missingReport = [];
         const characters = index.characters.slice();
+        const saveIndex = () => atomicWriteJson(indexPath, { schemaVersion: 1, updatedAt: Date.now(), characters });
+        let step = 0;
         for (const entry of plan) {
+            step += 1;
+            let shownName = entry.folderName;
             try {
                 let details = null;
                 let listed = null;
@@ -288,22 +367,32 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
                     details = summarize(entry.from, entry.folderName);
                     listed = sidebarOf ? sidebarOf(entry.id) : null;
                     // Before the folder moves: an interruption leaves only spare names behind.
+                    shownName = details.summary.name || entry.folderName;
                     const kept = protectAssets(entry.id, details.assets);
                     assetTotals.protected += kept.protected;
-                    assetTotals.missing += kept.missing;
+                    assetTotals.missing += kept.missing.length;
                     assetTotals.copied += kept.copied;
+                    assetTotals.inFolder += kept.inFolder;
+                    if (kept.missing.length) {
+                        details.missing = kept.missing;
+                        if (missingReport.length < 200) missingReport.push({ id: entry.id, name: shownName, count: kept.missing.length, examples: kept.missing.slice(0, 5) });
+                    }
                 }
                 fs.renameSync(entry.from, entry.to);
                 if (direction === 'archive') {
                     characters.push({
                         id: entry.id, ...details.summary, archivedAt: Date.now(),
+                        ...(details.missing ? { missingAssets: details.missing.length } : {}),
                         ...(listed ? { position: listed.position, sidebar: listed.entry } : {}),
                     });
-                    atomicWriteJson(path.join(referencesRoot, `${entry.id}.json`), { schemaVersion: 1, assets: details.assets });
+                    atomicWriteJson(path.join(referencesRoot, `${entry.id}.json`), {
+                        schemaVersion: 1, assets: details.assets, ...(details.missing ? { missing: details.missing } : {}),
+                    });
                 } else {
                     const at = characters.findIndex(item => item.id === entry.id);
                     if (at >= 0) {
                         const [removed] = characters.splice(at, 1);
+                        shownName = removed.name || entry.folderName;
                         if (removed.sidebar) restoredSidebar.push({ position: removed.position ?? Infinity, entry: removed.sidebar });
                     }
                     fs.rmSync(path.join(referencesRoot, `${entry.id}.json`), { force: true });
@@ -313,12 +402,17 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
             } catch (error) {
                 failed.push({ id: entry.id, error: String(error?.message || error) });
             }
+            // A long batch keeps its list on disk as it goes, so an interruption loses no order information.
+            if (step % 25 === 0 && step < plan.length) saveIndex();
+            if (onProgress) onProgress({ done: step, total: plan.length, name: shownName });
+            if (pause && step < plan.length) await pause();
         }
         fsyncDirectory(activeCharacters);
         fsyncDirectory(archivedCharacters);
-        atomicWriteJson(indexPath, { schemaVersion: 1, updatedAt: Date.now(), characters });
+        saveIndex();
         fs.rmSync(journalPath, { force: true });
-        return { moved, failed, restoredSidebar, assets: assetTotals };
+        dropAssetLookup();
+        return { moved, failed, restoredSidebar, assets: assetTotals, missing: missingReport };
     }
 
     // Asset file names that archived bots still need.
@@ -331,7 +425,7 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
         return names;
     }
 
-    return { archiveRoot, listArchived, move, recover, referencedAssets };
+    return { archiveRoot, listArchived, move, recover, pendingBatch, clearPendingBatch, referencedAssets };
 }
 
 module.exports = { ARCHIVE_DIRECTORY, createBangjuArchive };

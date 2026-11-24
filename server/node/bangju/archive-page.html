@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>방주 보관함 (시험용)</title>
+<title>방주 보관함</title>
 <style>
   :root { color-scheme: light dark; }
   body { font: 15px/1.5 system-ui, sans-serif; margin: 0; padding: 12px; max-width: 760px; margin-inline: auto; }
@@ -27,11 +27,15 @@
   .actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; align-items: center; }
   pre { white-space: pre-wrap; word-break: break-word; font-size: 13px; margin: 0; }
   .hidden { display: none; }
+  .warn { color: #c0392b; font-weight: 600; }
+  .meter { height: 6px; border-radius: 3px; background: #8883; margin: 6px 0 2px; overflow: hidden; }
+  .meter i { display: block; height: 100%; background: #4a7dff; }
+  .meter i.high { background: #c0392b; }
 </style>
 </head>
 <body>
-<h1>방주 보관함 <small>(시험용)</small></h1>
-<p class="note">보관함 검증을 위한 시험 화면입니다. 모양은 나중에 따로 만듭니다. <span id="version"></span></p>
+<h1>방주 보관함</h1>
+<p class="note">임시 모양의 화면입니다. 표지와 태그가 보이는 화면은 따로 만듭니다. <span id="version"></span></p>
 
 <div id="login" class="box">
   <label>리스버드 비밀번호 (평소 앱을 열 때 넣는 것) <input id="password" type="password" autocomplete="current-password"></label>
@@ -64,6 +68,10 @@
   <div class="actions">
     <button id="moveButton" class="primary"></button>
     <button id="keepOnlyButton">고른 것만 남기고 나머지 보관</button>
+  </div>
+  <div class="box hidden" id="interrupted">
+    <pre id="interruptedText"></pre>
+    <div class="actions"><button id="resumeButton" class="primary">이어서 하기</button><button id="dismissButton">그만두기</button></div>
   </div>
   <div class="box"><pre id="result">아직 옮긴 것이 없습니다.</pre></div>
 </div>
@@ -137,9 +145,15 @@
 
   function render() {
     const t = data.totals;
-    $('totals').innerHTML = '쓰는 것 <b>' + t.active + '개</b> · 글 데이터 합계 <b>' + mb(t.activeCardBytes) + '</b> (앱을 열 때 받는 양과 거의 같음)<br>'
+    // 봇을 넣거나 지울 때 앱은 쓰는 것 전체를 한 번에 올린다. 그 한도에 얼마나 가까운지 보여 준다.
+    const limit = t.serverRequestLimitBytes || 0;
+    const share = limit ? Math.min(100, Math.round(t.activeCardBytes / limit * 100)) : 0;
+    $('totals').innerHTML = '쓰는 것 <b>' + t.active + '개</b> · 글 데이터 합계 <b>' + mb(t.activeCardBytes) + '</b> (앱을 열 때 받는 양과 거의 같음)'
+      + (limit ? '<div class="meter"><i class="' + (share >= 80 ? 'high' : '') + '" style="width:' + share + '%"></i></div>'
+        + '<span class="' + (share >= 80 ? 'warn' : 'note') + '">봇 추가·삭제 한도 ' + mb(limit) + '의 ' + share + '%'
+        + (share >= 100 ? ' — 한도를 넘었습니다. 지금은 봇을 넣거나 지울 수 없습니다.' : share >= 80 ? ' — 한도에 가깝습니다.' : '') + '</span><br>' : '<br>')
       + '보관함 <b>' + t.archived + '개</b> · 글 데이터 합계 ' + mb(t.archivedCardBytes) + '<br>'
-      + '<span class="note">서버 보관 사본(채팅 포함) ' + mb(t.databaseBytes) + '</span>';
+      + '<span class="note">서버 보관 사본(채팅 포함) ' + mb(t.storedCopyBytes) + '</span>';
     $('tabActive').setAttribute('aria-selected', String(tab === 'active'));
     $('tabArchived').setAttribute('aria-selected', String(tab === 'archived'));
     $('moveButton').textContent = tab === 'active' ? '고른 것 보관하기' : '고른 것 불러오기';
@@ -180,19 +194,38 @@
   // 한 번 옮긴 결과를 글로 풀어 쓴다. 서버가 남겨 둔 '마지막 결과'에도 똑같이 쓴다.
   function describeRun(run) {
     const word = run.direction === 'archive' ? '보관' : '불러오기';
-    if (run.status !== 'done') {
-      return ['실패: ' + (run.error || run.code || '알 수 없는 오류'), '(시험용 사본이라 진짜 데이터에는 영향이 없습니다.)'];
-    }
+    if (run.status !== 'done') return ['실패: ' + (run.error || run.code || '알 수 없는 오류')];
     const t = run.timings || {};
+    const a = run.assets || {};
     const lines = [
       word + ' ' + run.moved.length + '개 완료, 실패 ' + run.failed.length + '개',
-      '걸린 시간: ' + ((run.totalMs || 0) / 1000).toFixed(1) + '초 (저장 정리 ' + (t.flushMs || 0) + 'ms, 폴더 옮기기 ' + (t.moveMs || 0) + 'ms, 목록 다시 읽기 ' + (t.adoptMs || 0) + 'ms)',
-      '서버 보관 사본(채팅 포함): ' + mb(run.before.databaseBytes) + ' → ' + mb(run.after.databaseBytes),
+      '걸린 시간: ' + ((run.totalMs || 0) / 1000).toFixed(1) + '초 (저장 정리 ' + (t.flushMs || 0) + 'ms, 폴더 옮기기 ' + (t.moveMs || 0) + 'ms'
+        + (t.adoptMs !== undefined ? ', 목록 다시 읽기 ' + t.adoptMs + 'ms' : '') + ')',
       '쓰는 것: ' + run.before.active + '개 → ' + run.after.active + '개',
-      '그림 보호: ' + JSON.stringify(run.assets),
     ];
+    if (run.direction === 'archive') {
+      lines.push('그림 보호: 이름표 ' + (a.protected || 0) + '장, 봇 폴더 안 ' + (a.inFolder || 0) + '장, 못 찾음 ' + (a.missing || 0) + '장'
+        + (a.copied ? ', 복사 ' + a.copied + '장' : ''));
+      for (const item of (run.missing || []).slice(0, 5)) {
+        lines.push('  못 찾은 그림: ' + (item.name || item.id) + ' ' + item.count + '장 (예: ' + item.examples.slice(0, 2).join(', ') + ')');
+      }
+      if ((run.missing || []).length > 5) lines.push('  … 그 밖에 봇 ' + ((run.missing || []).length - 5) + '개');
+    } else if (a.returned) {
+      lines.push('그림 되돌려 놓음: ' + a.returned + '장');
+    }
     if (run.failed.length) lines.push('실패한 것: ' + JSON.stringify(run.failed.slice(0, 10)));
+    if (run.settle === 'pending') lines.push('목록 정리는 서버가 뒤에서 합니다. 앱을 열어도 됩니다.');
     return lines;
+  }
+
+  function describeSettle(settled) {
+    if (!settled) return [];
+    if (settled.status === 'done') return ['목록 정리 완료 (' + ((settled.totalMs || 0) / 1000).toFixed(1) + '초)'];
+    if (settled.status === 'rolled-back') {
+      return ['목록 정리 실패: ' + (settled.error || ''), '옮긴 ' + (settled.rolledBack || 0) + '개를 원래 자리로 되돌렸습니다.'
+        + ((settled.notRolledBack || []).length ? ' 되돌리지 못한 것: ' + JSON.stringify(settled.notRolledBack.slice(0, 10)) : '')];
+    }
+    return [];
   }
 
   // 연결이 끊겨도 서버는 일을 끝까지 한다. 이 요청의 결과가 남을 때까지 기다린다.
@@ -208,48 +241,99 @@
     return null;
   }
 
-  async function move(ids, direction) {
-    if (busy || !ids.length) return;
+  // 옮긴 뒤 서버의 목록 정리가 끝나면 결과 아래에 한 줄 덧붙인다.
+  let settleWatch = 0;
+  async function watchSettle(lines, since) {
+    const mine = ++settleWatch;
+    for (let attempt = 0; attempt < 400 && mine === settleWatch; attempt++) {
+      await sleep(2000);
+      let status = null;
+      try { status = await call('/api/bangju/archive/status'); } catch { continue; }
+      if (mine !== settleWatch || busy) return;
+      const settled = status.lastSettle;
+      if (status.settle.state === 'idle' && !status.settle.bots) {
+        const fresh = settled && new Date(settled.finishedAt).getTime() >= since ? describeSettle(settled) : ['목록 정리 완료'];
+        $('result').textContent = lines.filter(line => !line.startsWith('목록 정리는')).concat(fresh).join('\n');
+        if (settled && settled.status === 'rolled-back') { try { await refresh(); } catch {} }
+        return;
+      }
+    }
+  }
+
+  async function move(ids, direction, resume) {
+    if (busy || (!resume && !ids.length)) return;
     const word = direction === 'archive' ? '보관' : '불러오기';
-    if (!confirm(ids.length + '개를 ' + word + '할까요?')) return;
+    if (!resume && !confirm(ids.length + '개를 ' + word + '할까요?')) return;
     busy = true; count();
+    settleWatch += 1;
     const startedAt = Date.now();
-    const waiting = () => { $('result').textContent = word + ' 중입니다… ' + Math.round((Date.now() - startedAt) / 1000) + '초 지남\n많으면 몇 분 걸릴 수 있습니다. 창을 닫지 말고 기다려 주세요.'; };
+    let progress = '';
+    const waiting = () => {
+      $('result').textContent = word + ' 중입니다… ' + Math.round((Date.now() - startedAt) / 1000) + '초 지남' + (progress ? '\n' + progress : '')
+        + '\n많으면 몇 분 걸립니다. 이 창을 닫아도 서버는 끝까지 하고, 다시 열면 결과가 보입니다.';
+    };
     waiting();
     const timer = setInterval(waiting, 1000);
+    // 서버가 몇 개째 하고 있는지 물어본다.
+    const poller = setInterval(async () => {
+      try {
+        const status = await call('/api/bangju/archive/status');
+        if (status.running) progress = status.running.done + ' / ' + status.running.total + '개' + (status.running.current ? ' · 지금: ' + status.running.current : '');
+        else if (status.queued) progress = '앞선 작업이 끝나기를 기다리는 중';
+      } catch {}
+    }, 2000);
     const runId = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
     try {
       let run;
       try {
-        run = await call('/api/bangju/archive/move', { ids, direction, runId });
+        run = await call('/api/bangju/archive/move', resume ? { resume: true, runId } : { ids, direction, runId });
       } catch (error) {
         // TypeError = 답을 받기 전에 연결이 끊긴 경우. 그 밖의 오류는 서버가 답한 것이다.
         if (!(error instanceof TypeError)) throw error;
         run = await waitForRun(runId);
         if (!run) throw new Error('서버와 연결이 끊겨 결과를 받지 못했습니다. 이 화면을 새로 고쳐 보세요.');
       }
-      clearInterval(timer);
+      clearInterval(timer); clearInterval(poller);
       const lines = describeRun(run);
       $('result').textContent = lines.join('\n');
       try { await refresh(); }
       catch (error) { $('result').textContent = lines.concat('(목록을 새로 고치지 못했습니다: ' + error.message + ' — 화면을 새로 고쳐 주세요.)').join('\n'); }
+      if (run.settle === 'pending') watchSettle(lines, startedAt);
     } catch (error) {
-      clearInterval(timer);
-      $('result').textContent = '실패: ' + error.message + '\n(시험용 사본이라 진짜 데이터에는 영향이 없습니다.)';
+      clearInterval(timer); clearInterval(poller);
+      $('result').textContent = '실패: ' + error.message;
       try { await refresh(); } catch {}
-    } finally { clearInterval(timer); busy = false; count(); }
+    } finally { clearInterval(timer); clearInterval(poller); busy = false; count(); showInterrupted(); }
+  }
+
+  // 서버가 중간에 꺼져서 끊긴 묶음이 있으면 이어서 할지 묻는다.
+  async function showInterrupted() {
+    try {
+      const status = await call('/api/bangju/archive/status');
+      const pending = status.interrupted;
+      $('interrupted').classList.toggle('hidden', !pending);
+      if (pending) {
+        const word = pending.direction === 'archive' ? '보관' : '불러오기';
+        $('interruptedText').textContent = '지난번 ' + word + '가 중간에 끊겼습니다. ' + pending.total + '개 중 ' + pending.remaining + '개가 남았습니다.';
+        $('resumeButton').onclick = () => move([], pending.direction, true);
+        $('dismissButton').onclick = async () => { try { await call('/api/bangju/archive/dismiss-interrupted', {}); } catch {} showInterrupted(); };
+      }
+      return status;
+    } catch { return null; }
   }
 
   // 화면을 다시 열었을 때: 지난번 결과가 남아 있으면 보여 준다.
   async function showLastRun() {
-    try {
-      const status = await call('/api/bangju/archive/status');
-      if (status.running || status.queued) {
-        $('result').textContent = '지금 서버가 옮기는 중입니다. 끝나면 이 화면을 새로 고쳐 주세요.';
-      } else if (status.last) {
-        $('result').textContent = '마지막 작업 (' + new Date(status.last.finishedAt).toLocaleString('ko-KR') + ')\n' + describeRun(status.last).join('\n');
-      }
-    } catch {}
+    const status = await showInterrupted();
+    if (!status) return;
+    if (status.running || status.queued) {
+      $('result').textContent = '지금 서버가 옮기는 중입니다' + (status.running ? ' (' + status.running.done + ' / ' + status.running.total + '개)' : '') + '. 끝나면 이 화면을 새로 고쳐 주세요.';
+    } else if (status.last) {
+      const lines = ['마지막 작업 (' + new Date(status.last.finishedAt).toLocaleString('ko-KR') + ')'].concat(describeRun(status.last));
+      const settled = status.lastSettle && new Date(status.lastSettle.finishedAt) >= new Date(status.last.finishedAt) ? describeSettle(status.lastSettle) : [];
+      $('result').textContent = lines.filter(line => !settled.length || !line.startsWith('목록 정리는')).concat(settled).join('\n');
+      if (status.settle.state !== 'idle') watchSettle(lines, new Date(status.last.finishedAt).getTime() - 1000);
+    }
   }
 
   $('loginButton').addEventListener('click', login);
@@ -266,7 +350,7 @@
     render();
   });
   fetch('/api/bangju/version').then(response => response.json()).then(info => {
-    $('version').textContent = '시험판 ' + info.commit + (info.builtAt ? ' · ' + new Date(info.builtAt).toLocaleString('ko-KR') : '');
+    $('version').textContent = '버전 ' + info.commit + (info.builtAt ? ' · ' + new Date(info.builtAt).toLocaleString('ko-KR') : '');
   }).catch(() => {});
   $('moveButton').addEventListener('click', () => move([...picked], tab === 'active' ? 'archive' : 'restore'));
   $('keepOnlyButton').addEventListener('click', () => move(data.active.filter(item => !picked.has(item.id)).map(item => item.id), 'archive'));
