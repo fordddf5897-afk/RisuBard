@@ -7,12 +7,13 @@ import { createWikiInquiryDiagnostic, formatWikiInquiryDiagnostic, wikiInquiryFa
 import { get } from "svelte/store";
 import { type Database, type character, type MessageGenerationInfo, type Chat, type MessagePresetInfo, changeToPreset, getActivePromptOverlayToggleTemplate, getChatToggleScope, type Message, normalizeChat, type StreamingDisplayOptimizationMode } from "../storage/database.svelte";
 import { DBState } from '../stores.svelte';
-import { CharEmotion, selectedCharID } from "../stores.svelte";
+import { alertStore, CharEmotion, selectedCharID } from "../stores.svelte";
 import { ChatTokenizer, tokenize, tokenizeNum } from "../tokenizer";
 import { language } from "../../lang";
-import { alertConfirmMulti, alertError, notifyError } from "../alert";
+import { alertConfirmMultiOutcome, alertError, notifyError } from "../alert";
 import { parseChatML } from "../parser/chatML";
 import { loadLoreBookV3Prompt } from "./lorebook.svelte";
+import { isStableAlwaysActiveLore, resolveStableLoreIndex } from "./lorebookStablePrefix";
 import { findCharacterbyId, getPersonaPrompt, getUserName, isLastCharPunctuation, trimUntilPunctuation, parseToggleSyntax, prebuiltAssetCommand, sleep } from "../util";
 import { requestChatData } from "./request/request";
 import { getPartialPresetStreamText } from './request/presetStreamPump';
@@ -49,7 +50,7 @@ import {
 } from "../risubard/memoryAnalysisClient";
 import { enqueueNarrativeConfirmation, narrativeConfirmationsSettled } from '../risubard/narrativeConfirmationQueue';
 import { groupNarrativeBacklog, NARRATIVE_BACKLOG_TURNS_PER_RUN, narrativeAnalysisDue, narrativeTurnsPerCall, withoutRepeatedMessages } from '../risubard/narrativeBacklogBatch';
-import { summarizeWikiAnalysisGap, wikiBacklogMessages } from '../risubard/wikiBacklog';
+import { parseWikiGapPrompt, summarizeWikiAnalysisGap, wikiBacklogInterrupted, wikiBacklogMessages, type WikiGapPrompt } from '../risubard/wikiBacklog';
 import { projectActiveNarrativeSources } from "../risubard/sourceProjection";
 import {
     createNarrativeSourcesPrompt,
@@ -582,14 +583,15 @@ const declinedWikiGapTurns = new Set<string>()
 /**
  * Asks whether to analyze the turns left unanalyzed since the last confirmed
  * one, such as replies written while automatic analysis was off. Returns
- * 'catch-up' after queueing them, 'latest' to analyze only the newest turn, or
- * 'cancel'.
+ * 'catch-up' after queueing them, 'latest' to analyze only the newest turn,
+ * 'cancel', or 'interrupted' when another alert replaced the prompt before it
+ * was answered.
  */
 async function askWikiGapCatchUp(
     chat: Chat,
     targetMessageId: string,
     respectDeclined: boolean,
-): Promise<'none' | 'catch-up' | 'latest' | 'cancel'> {
+): Promise<'none' | 'catch-up' | 'latest' | 'cancel' | 'interrupted'> {
     const gap = summarizeWikiAnalysisGap(chat.message, {
         beforeMessageId: targetMessageId,
         excludeMessageIds: new Set(respectDeclined
@@ -600,7 +602,7 @@ async function askWikiGapCatchUp(
     if (gap.messageIds.length === 0) return 'none'
     const target = chat.message.find((message) => message.role === 'char' && message.chatId === targetMessageId)
     const total = gap.messageIds.length + (target && target.risubardMemoryConfirmed !== true ? 1 : 0)
-    const choice = await alertConfirmMulti(
+    const choice = await alertConfirmMultiOutcome(
         `분석되지 않은 턴 ${total.toLocaleString()}개가 있습니다`,
         [
             { label: `${gap.startResponseNumber.toLocaleString()}턴부터 이어서 분석`, variant: 'primary' },
@@ -608,6 +610,8 @@ async function askWikiGapCatchUp(
         ],
         '마지막으로 분석된 턴 뒤에 위키에 반영되지 않은 턴이 있습니다. 자동 분석이 꺼져 있던 동안의 턴일 수 있습니다.\n이어서 분석하면 오래된 턴부터 순서대로 반영하며, 턴 수에 따라 분석 요청이 여러 번 나갑니다. 기존 위키는 그대로 유지됩니다.',
     )
+    // Not answered: the turns stay unanalyzed and are asked about again, not declined.
+    if (choice === 'replaced') return 'interrupted'
     if (choice === 0) {
         const ids = new Set(gap.messageIds)
         for (const message of chat.message) {
@@ -619,6 +623,54 @@ async function askWikiGapCatchUp(
     }
     for (const id of gap.messageIds) declinedWikiGapTurns.add(id)
     return choice === 1 ? 'latest' : 'cancel'
+}
+
+const WIKI_GAP_PROMPT_KEY = 'risubard-wiki-gap-prompt'
+let wikiGapPromptOpen = false
+
+/**
+ * Keeps the turn whose catch-up prompt is showing, so that a prompt lost to a
+ * page reload or app close (a mobile app sent to the background or swiped
+ * away) or to another alert can be shown again. localStorage, because a closed
+ * mobile app starts with an empty sessionStorage.
+ */
+function rememberWikiGapPrompt(prompt: WikiGapPrompt | undefined): void {
+    try {
+        if (prompt) {
+            const { characterId, chatId, targetMessageId } = prompt
+            localStorage.setItem(WIKI_GAP_PROMPT_KEY, JSON.stringify({ characterId, chatId, targetMessageId, at: Date.now() }))
+        } else {
+            localStorage.removeItem(WIKI_GAP_PROMPT_KEY)
+        }
+    } catch {
+        // Storage unavailable: an unanswered prompt waits for the next reply as before.
+    }
+}
+
+/**
+ * Shows the current chat's catch-up prompt again when it was left unanswered.
+ * Leaves the record while the chat's messages may still be loading, and drops
+ * it once the turn was analyzed or queued some other way.
+ */
+function resumeWikiGapPrompt(): void {
+    let prompt: WikiGapPrompt | undefined
+    try {
+        prompt = parseWikiGapPrompt(localStorage.getItem(WIKI_GAP_PROMPT_KEY))
+    } catch {
+        return
+    }
+    if (!prompt || wikiGapPromptOpen || get(alertStore).type !== 'none') return
+    if (!shouldAutomaticallyConfirmNarrativeTurn(DBState.db.risuBardAutoWikiEnabled)) return
+    const character = DBState.db.characters[get(selectedCharID)]
+    const chat = character?.chats[character.chatPage]
+    if (character?.chaId !== prompt.characterId || chat?.id !== prompt.chatId) return
+    const target = findNarrativeMessage(prompt.characterId, prompt.chatId, prompt.targetMessageId)
+    if (!target) return
+    if (target.risubardMemoryConfirmed === true || target.risubardWikiPending) {
+        rememberWikiGapPrompt(undefined)
+        return
+    }
+    queueNarrativeTurn(prompt)
 }
 
 /** Queues a new turn and analyzes the backlog once the chat's turn interval is reached. */
@@ -645,7 +697,12 @@ function queueNarrativeTurn(input: {
         }
     }
     else if (chat && gap.length > 0) {
+        rememberWikiGapPrompt(input)
+        wikiGapPromptOpen = true
         void askWikiGapCatchUp(chat, input.targetMessageId, true).then((choice) => {
+            wikiGapPromptOpen = false
+            if (choice === 'interrupted') return
+            rememberWikiGapPrompt(undefined)
             if (choice !== 'catch-up') {
                 queueNarrativeTurnNow(input)
                 return
@@ -747,6 +804,63 @@ export async function retryNarrativeBacklog(): Promise<void> {
     await processNarrativeBacklog({
         characterId: character.chaId,
         chatId,
+    })
+}
+
+/** When the app last went out of view; analysis failing after it was likely cut off. */
+let narrativeHiddenSince: string | undefined
+
+/**
+ * Resumes the current chat's wiki analysis that came due but was cut off, such
+ * as when a mobile app went to the background mid-analysis or was closed. The
+ * model job still finishes on the server, but nothing else would run those
+ * turns again until the next reply. Waits for an analysis still running, and
+ * does nothing with automatic analysis off, before the turn interval is
+ * reached, or when a turn failed while the app was in view.
+ */
+export async function resumeNarrativeBacklog(): Promise<void> {
+    if (!shouldAutomaticallyConfirmNarrativeTurn(DBState.db.risuBardAutoWikiEnabled)) return
+    const character = DBState.db.characters[get(selectedCharID)]
+    const chat = character?.chats[character.chatPage]
+    if (!character || !chat) return
+    if (wikiBacklogMessages(chat.message, undefined, true).length === 0) return
+    const chatId = ensureNarrativeSessionChatId(chat, v4)
+    await narrativeBacklogRuns.get(JSON.stringify([character.chaId, chatId]))
+    const queued = wikiBacklogMessages(chat.message, undefined, true)
+    if (!narrativeAnalysisDue(queued.length, resolvedRisuBardSettings(chat).risuBardAnalysisTurnInterval)
+        || !wikiBacklogInterrupted(queued, narrativeHiddenSince)) return
+    await drainNarrativeBacklog(character.chaId, chatId)
+}
+
+let narrativeResumeInstalled = false
+
+/**
+ * Resumes cut-off wiki analysis, and shows an unanswered catch-up prompt again,
+ * when the app returns to view or another chat is opened.
+ */
+export function initNarrativeBacklogResume(): void {
+    if (narrativeResumeInstalled) return
+    narrativeResumeInstalled = true
+    const askAgain = () => {
+        try {
+            resumeWikiGapPrompt()
+        } catch (error) {
+            console.warn('[RisuBard memory resume]', error)
+        }
+    }
+    const resume = () => {
+        void resumeNarrativeBacklog().catch((error) => console.warn('[RisuBard memory resume]', error))
+        askAgain()
+    }
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') narrativeHiddenSince = new Date().toISOString()
+        else resume()
+    })
+    // Runs now for the chat open at boot, and again whenever another character is opened.
+    // An opened chat's messages may still be loading, so the prompt check looks again shortly after.
+    selectedCharID.subscribe(() => {
+        resume()
+        for (const delay of [1500, 4000]) setTimeout(askAgain, delay)
     })
 }
 
@@ -854,7 +968,7 @@ export async function forceCurrentNarrativeWikiUpdate(): Promise<boolean | null>
     )
     if (!target?.chatId) return false
     const gapChoice = await askWikiGapCatchUp(chat, target.chatId, false)
-    if (gapChoice === 'cancel') return null
+    if (gapChoice === 'cancel' || gapChoice === 'interrupted') return null
     // Turns already queued before the latest one, such as a batch that was waiting for its interval or was
     // stopped, go first and in story order; analyzing only the latest let it overtake them.
     const queuedBefore = wikiBacklogMessages(chat.message, target.chatId, true)
@@ -2643,8 +2757,18 @@ export async function sendChat(chatProcessIndex = -1,arg:{
     })
     console.log(normalActives)
 
+    // Experimental: always-active lore goes in front of the chat history so it
+    // stays inside the cacheable prefix (see lorebookStablePrefix.ts).
+    const stableLoreIndex = requestSettings.loreAlwaysActiveBeforeChat
+        ? resolveStableLoreIndex(promptTemplate)
+        : -1
+    const stableLorePrompts: OpenAIChat[] = []
+
     for(const lorebook of normalActives){
-        unformated.lorebook.push(setRequestStatusSource({
+        const target = stableLoreIndex >= 0 && isStableAlwaysActiveLore(lorebook)
+            ? stableLorePrompts
+            : unformated.lorebook
+        target.push(setRequestStatusSource({
             role: lorebook.role,
             content: parseGenerationText(resolvePosition(lorebook.prompt), {chara: currentChar})
         }, lorebook.requestStatusKind, lorebook.source))
@@ -2802,6 +2926,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{
             }
         }
 
+        let stableLoreTokenized = false
         for(const card of template){
             switch(card.type){
                 case 'persona':{
@@ -2841,6 +2966,10 @@ export async function sendChat(chatProcessIndex = -1,arg:{
                 }
                 case 'lorebook':{
                     await tokenizeChatArray(unformated.lorebook)
+                    if(!stableLoreTokenized){
+                        stableLoreTokenized = true
+                        await tokenizeChatArray(stableLorePrompts)
+                    }
                     break
                 }
                 case 'postEverything':{
@@ -3349,7 +3478,11 @@ export async function sendChat(chatProcessIndex = -1,arg:{
     if(promptTemplate){
         const template = promptTemplate
 
+        let templateCardIndex = -1
         for(const card of template){
+            if(++templateCardIndex === stableLoreIndex){
+                pushPrompts(stableLorePrompts, { kind: 'lorebook' })
+            }
             switch(card.type){
                 case 'persona':{
                     let pmt = safeStructuredClone(unformated.personaPrompt)

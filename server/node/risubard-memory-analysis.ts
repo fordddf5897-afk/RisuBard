@@ -114,6 +114,7 @@ import { wikiWritingLocales } from '../../src/ts/risubard/wikiWritingLanguage'
 import {
     STORY_ARC_EVENT_EXCERPT_CHARACTERS,
     STORY_ARC_MAX_MARKDOWN_CHARACTERS,
+    storyArcLengthError,
     buildStoryArcUpdatePlan,
     isStoryArcCandidate,
     isStoryArcChapterTitle,
@@ -1743,6 +1744,26 @@ export function createMemoryAnalysisRunner(
                         ?? retrievalMetadata?.storyTime ?? { day: null, precision: 'unknown' })
                 }
             }
+            // A re-analysed turn renames its event, and saving it rewrites the links in the cards
+            // that named the old title. Read those cards again so their update builds on that rewrite.
+            if (documentsLoaded && options.markdownWikiService.loadDocuments
+                && savedEvents.some((saved) => documents.some((document) =>
+                    document.id === saved.id && document.title !== saved.title))) {
+                try {
+                    const fresh = new Map((await options.markdownWikiService.loadDocuments(
+                        snapshot.characterId,
+                        snapshot.chatId,
+                        ...optionalSignalArgument(signal)
+                    )).map((document) => [document.id, document]))
+                    documents = documents.map((document) => document.type === 'event'
+                        ? document
+                        : fresh.get(document.id) ?? document)
+                }
+                catch (error) {
+                    signal?.throwIfAborted()
+                    await reportError(error)
+                }
+            }
             const receiptWarningsBeforeCanon: string[] = []
             const chapterNotes: string[] = []
             const chapterChanges: Array<{ documentId: string; title: string; relativePath: string; afterHash: string }> = []
@@ -2285,10 +2306,9 @@ export function createMemoryAnalysisRunner(
                                                 : patched
                                             if (target.storyArcPlan) {
                                                 validateStoryArcCheckpointEventLink(rewritten, target.storyArcPlan.events)
-                                                if (stampStoryArcCheckpoint(rewritten, target.storyArcPlan.checkpointEventId).length
-                                                    > (snapshot.arcPlotterSettings?.maxCharacters ?? STORY_ARC_MAX_MARKDOWN_CHARACTERS)) {
-                                                    throw new Error('Story arc Markdown exceeds the configured character limit')
-                                                }
+                                                const length = stampStoryArcCheckpoint(rewritten, target.storyArcPlan.checkpointEventId).length
+                                                const limit = snapshot.arcPlotterSettings?.maxCharacters ?? STORY_ARC_MAX_MARKDOWN_CHARACTERS
+                                                if (length > limit) throw storyArcLengthError(length, limit)
                                             }
                                             valid.push(document)
                                         }
@@ -2437,12 +2457,9 @@ export function createMemoryAnalysisRunner(
                                         ensureStoryArcEventLink(rewritten, entry.storyArcPlan.events),
                                         entry.storyArcPlan.checkpointEventId
                                     )
-                                    if (rewritten.length
-                                        > (snapshot.arcPlotterSettings
-                                            ?.maxCharacters
-                                            ?? STORY_ARC_MAX_MARKDOWN_CHARACTERS)) {
-                                        throw new Error('Story arc Markdown exceeds the configured character limit')
-                                    }
+                                    const limit = snapshot.arcPlotterSettings?.maxCharacters
+                                        ?? STORY_ARC_MAX_MARKDOWN_CHARACTERS
+                                    if (rewritten.length > limit) throw storyArcLengthError(rewritten.length, limit)
                                     // The limit applies to the model's rewrite; restored arcs are
                                     // earlier text and leave with the next closed chapter.
                                     const recovered = restoreDroppedStoryArcs(entry.preparedMarkdown, rewritten,

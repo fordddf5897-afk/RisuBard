@@ -30,6 +30,7 @@
     import { EASY_OPEN_SAVE_SLOTS, EASY_QUICK_SAVE, saveSlotModeFrom } from 'src/ts/easyMode/events';
     let openChatList = $state(false)
     let openModuleList = $state(false)
+    let moduleListView = $state<'modules' | 'skins'>('modules')
     let saveSlotsOpen = $state(false)
     let saveSlotsMode = $state<'save' | 'load'>('load')
     let savingSlot = $state(false)
@@ -296,6 +297,7 @@
 
     $effect(() => {
         if ($openModuleListStore) {
+            moduleListView = $openModuleListStore === 'skins' ? 'skins' : 'modules'
             openModuleList = true
             openModuleListStore.set(false)
         }
@@ -345,7 +347,10 @@
 </script>
 
 {#snippet chatChrome()}
-    <SideBarArrow />
+    <!-- The chat view renders its own arrow inside its stacking context; the gallery has none. -->
+    {#if $risuBardGalleryOpen && galleryCharacter}
+        <SideBarArrow />
+    {/if}
 {/snippet}
 
 {#snippet chatViewport(customStyle: string)}
@@ -417,7 +422,7 @@
 {#if openChatList}
     <ChatList close={() => {openChatList = false}}/>
 {:else if openModuleList}
-    <ModuleChatMenu close={() => {openModuleList = false}}/>
+    <ModuleChatMenu initialView={moduleListView} close={() => {openModuleList = false; moduleListView = 'modules'}}/>
 {/if}
 
 {#if currentCharacter?.chaId}
