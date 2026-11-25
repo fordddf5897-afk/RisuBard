@@ -35,6 +35,7 @@ seeded() { node seed2.cjs "$BASE" 12 > /dev/null 2>&1; }
 
 check "t10 그림 찾기(모듈)" node t10.cjs
 check "t16 업데이트 미리 합쳐 보기와 위험도" node t16.cjs
+check "t17 내용이 똑같은 봇 견주기" node t17.cjs
 
 for t in t1 t2 t3 t8 t12; do
   case $t in t1) label="t1 보관·불러오기 핵심";; t2) label="t2 V3 폴더 봇";; t3) label="t3 그림 보호 두 겹";; t8) label="t8 마지막 결과 남기기";; t12) label="t12 목록 정보와 표지";; esac
@@ -64,6 +65,7 @@ if [ -n "$CHROME" ]; then
   if NODE_PATH="${PUPPETEER_DIR:-$WORK/browser}/node_modules" node -e "require('puppeteer-core')" 2> /dev/null; then
     start BANGJU_ARCHIVE_SETTLE_DELAY_MS=2000 && seeded && check "화면(실제 브라우저)" env NODE_PATH="${PUPPETEER_DIR:-$WORK/browser}/node_modules" CHROME="$CHROME" node page-test.cjs "$BASE" "$WORK/page.png"; finish
     start BANGJU_ARCHIVE_SETTLE=now && seeded && check "화면의 폴더 보기(실제 브라우저)" env NODE_PATH="${PUPPETEER_DIR:-$WORK/browser}/node_modules" CHROME="$CHROME" node page-folders.cjs "$BASE"; finish
+    start BANGJU_ARCHIVE_SETTLE=now && seeded && check "내용이 똑같은 봇 알림(실제 브라우저)" env NODE_PATH="${PUPPETEER_DIR:-$WORK/browser}/node_modules" CHROME="$CHROME" node page-twins.cjs "$BASE"; finish
     start && seeded && check "업데이트 확인 화면(실제 브라우저)" env NODE_PATH="${PUPPETEER_DIR:-$WORK/browser}/node_modules" CHROME="$CHROME" node page-update.cjs "$BASE" "$ROOT" $PORT "$LOG"; finish
     # the app itself: built first, then driven in the browser against a seeded server
     if [ $APP -eq 1 ]; then

@@ -40,6 +40,8 @@
   .tags { display: flex; gap: 4px; overflow: hidden; margin-top: 2px; }
   .tags span { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 0 5px; white-space: nowrap; }
   .tags span.in-folder { border-color: transparent; background: var(--soft); }
+  .tags span.twin { border-color: #c98a00; color: #8a5a00; background: #fff6df; }
+  @media (prefers-color-scheme: dark) { .tags span.twin { color: #f1c56b; background: #3a2f12; border-color: #8a6a1f; } }
   .group { padding: 7px 12px; font-size: 13px; font-weight: 600; color: var(--muted); background: var(--soft); border-bottom: 1px solid var(--soft); }
   .side { text-align: right; font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; flex: none; }
   .side b { display: block; font-size: 13px; color: inherit; font-weight: 600; }
@@ -88,6 +90,7 @@
       <option value="name">이름순</option>
       <option value="folder">폴더별로 묶기</option>
     </select>
+    <button id="sortFlip" type="button" title="정렬 순서 뒤집기" aria-label="정렬 순서 뒤집기"></button>
     <label class="toggle"><input id="showCovers" type="checkbox"> 표지 보기</label>
   </div>
   <div class="actions">
@@ -95,6 +98,7 @@
     <button id="selectNone">고르기 풀기</button>
     <span class="note">위에서 <input id="topCount" type="number" min="1" value="100" style="width:5em"> 개</span>
     <button id="selectTop">고르기</button>
+    <button id="twinsOnly" type="button" class="hidden" aria-pressed="false"></button>
   </div>
   <div class="list plain" id="list"></div>
   <div class="box"><pre id="result">아직 옮긴 것이 없습니다.</pre></div>
@@ -170,6 +174,28 @@
     fillFolders();
     render();
     if (data.factsPending) watchFacts();
+    watchTwins(true);
+  }
+
+  // 내용이 똑같은 봇: 쓰는 것과 보관함 양쪽에 카드 내용이 100% 같은 봇. 서버가 뒤에서 읽으므로 다 읽을 때까지 가끔 묻는다.
+  let twins = { active: {}, archived: {} };
+  let twinsWatch = 0;
+  let twinsOnly = false;
+  const twinsOf = item => (tab === 'active' ? twins.active : twins.archived)[item.id] || null;
+  async function watchTwins(fresh) {
+    const mine = ++twinsWatch;
+    for (let attempt = 0; attempt < 200 && mine === twinsWatch; attempt++) {
+      // 옮기는 동안에는 묻지 않는다. 다 옮기면 목록을 새로 받으면서 다시 시작한다.
+      if (busy) { await sleep(3000); continue; }
+      let answer = null;
+      try { answer = await call('/api/bangju/archive/twins' + (fresh && attempt === 0 ? '?fresh=1' : '')); } catch { await sleep(3000); continue; }
+      if (mine !== twinsWatch) return;
+      const before = JSON.stringify(twins);
+      twins = { active: answer.active || {}, archived: answer.archived || {} };
+      if (JSON.stringify(twins) !== before && !busy) render();
+      if (!answer.pending) return;
+      await sleep(3000);
+    }
   }
 
   // 폴더 고르기: 앱에 있는 폴더, 폴더 없음, 그리고 보관된 봇이 들어 있던(지금은 없어진) 폴더.
@@ -233,13 +259,33 @@
     const filtered = query
       ? items.filter(item => (item.name || '').toLowerCase().includes(query) || (item.tags || []).some(tag => tag.toLowerCase().includes(query)))
       : items;
+    if (twinsOnly) for (let at = filtered.length - 1; at >= 0; at--) if (!twinsOf(filtered[at])) filtered.splice(at, 1);
     const sort = $('sort').value;
-    if (sort === 'size') filtered.sort((a, b) => (b.cardBytes || 0) - (a.cardBytes || 0));
-    else if (sort === 'name') filtered.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
-    else if (sort === 'folder') filtered.sort((a, b) => rankOf(a) - rankOf(b) || (a.name || '').localeCompare(b.name || '', 'ko'));
-    else if (sort === 'idle') filtered.sort((a, b) => (a.lastChatAt || 0) - (b.lastChatAt || 0));
-    else filtered.sort((a, b) => (b.lastChatAt || 0) - (a.lastChatAt || 0));
+    const way = flipped[sort] ? -1 : 1;
+    const byName = (a, b) => (a.name || '').localeCompare(b.name || '', 'ko');
+    if (sort === 'size') filtered.sort((a, b) => way * ((b.cardBytes || 0) - (a.cardBytes || 0)));
+    else if (sort === 'name') filtered.sort((a, b) => way * byName(a, b));
+    // 폴더별로 묶기를 뒤집으면 폴더의 순서만 거꾸로 되고, 폴더 안은 그대로 이름순이다.
+    else if (sort === 'folder') filtered.sort((a, b) => way * (rankOf(a) - rankOf(b)) || byName(a, b));
+    else if (sort === 'idle') filtered.sort((a, b) => way * ((a.lastChatAt || 0) - (b.lastChatAt || 0)));
+    else filtered.sort((a, b) => way * ((b.lastChatAt || 0) - (a.lastChatAt || 0)));
     return filtered;
+  }
+
+  // 정렬마다 위아래를 뒤집을 수 있다(B7). 단추에는 지금 어느 쪽부터 나오는지 적는다.
+  // 뒤집은 것은 정렬마다 따로 기억한다(이 화면을 열어 둔 동안).
+  const SORT_ENDS = {
+    size: ['큰 것부터', '작은 것부터'],
+    idle: ['오래 안 쓴 것부터', '최근에 쓴 것부터'],
+    recent: ['최근에 쓴 것부터', '오래 안 쓴 것부터'],
+    name: ['가나다순', '가나다 거꾸로'],
+    folder: ['폴더 순서대로', '폴더 순서 거꾸로'],
+  };
+  const flipped = {};
+  function showSortEnd() {
+    const sort = $('sort').value;
+    $('sortFlip').textContent = '⇅ ' + SORT_ENDS[sort][flipped[sort] ? 1 : 0];
+    $('sortFlip').setAttribute('aria-pressed', flipped[sort] ? 'true' : 'false');
   }
 
   const day = time => (time ? new Date(time).toLocaleDateString('ko-KR', { year: '2-digit', month: 'numeric', day: 'numeric' }) : '');
@@ -316,9 +362,11 @@
     main.append(name);
     // 폴더 이름은 폴더별로 묶어 보거나 한 폴더만 볼 때는 줄마다 되풀이하지 않는다.
     const showFolder = groupOf(item) && $('sort').value !== 'folder' && $('folder').value === '*';
-    if (showFolder || (item.tags || []).length) {
+    const twin = twinsOf(item);
+    if (showFolder || twin || (item.tags || []).length) {
       const tags = document.createElement('div');
       tags.className = 'tags';
+      if (twin) { const chip = document.createElement('span'); chip.className = 'twin'; chip.textContent = tab === 'active' ? '보관함에 똑같은 봇 있음' : '쓰는 것에 똑같은 봇 있음'; tags.append(chip); }
       if (showFolder) { const chip = document.createElement('span'); chip.className = 'in-folder'; chip.textContent = '폴더: ' + folderNames.get(item.folderId); tags.append(chip); }
       for (const tag of (item.tags || []).slice(0, 4)) { const chip = document.createElement('span'); chip.textContent = tag; tags.append(chip); }
       main.append(tags);
@@ -362,6 +410,12 @@
   }
 
   function render() {
+    // 똑같은 봇만 보기: 지금 탭에 그런 봇이 있을 때만 단추가 보인다.
+    const twinCount = Object.keys(tab === 'active' ? twins.active : twins.archived).length;
+    if (!twinCount) twinsOnly = false;
+    $('twinsOnly').classList.toggle('hidden', !twinCount);
+    $('twinsOnly').textContent = twinsOnly ? '전부 보기 (똑같은 봇 ' + twinCount + '개만 보는 중)' : '똑같은 봇만 보기 (' + twinCount + '개)';
+    $('twinsOnly').setAttribute('aria-pressed', twinsOnly ? 'true' : 'false');
     const t = data.totals;
     // 봇을 넣거나 지울 때 앱은 쓰는 것 전체를 한 번에 올린다. 그 한도에 얼마나 가까운지 보여 준다.
     const limit = t.serverRequestLimitBytes || 0;
@@ -401,6 +455,17 @@
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+  // 서버가 봇 하나를 옮기지 않은 까닭(서버의 영어 문구 → 화면에 보일 말).
+  const FAIL_REASONS = {
+    'A bot folder with this name already exists': '"쓰는 것"에 같은 이름의 봇 폴더가 이미 있습니다. 같은 봇을 다시 가져온 경우라면, 새로 가져온 쪽을 정리한 뒤 다시 불러오세요.',
+    'A folder with this name is already archived': '보관함에 같은 이름의 봇 폴더가 이미 있습니다. 같은 봇이 이미 보관되어 있을 수 있습니다.',
+    'Bot folder not found': '봇 폴더를 찾지 못했습니다.',
+    'Archived folder not found': '보관된 폴더를 찾지 못했습니다.',
+    'Bot is not in the archive': '보관함에 없는 봇입니다.',
+  };
+  // 옮기기 전에 받아 둔 목록에서 이름을 찾는다(결과가 올 때는 아직 목록을 새로 받기 전이다).
+  const nameOfBot = id => ((data && (data.active.find(item => item.id === id) || data.archived.find(item => item.id === id))) || {}).name || id;
+
   // 한 번 옮긴 결과를 글로 풀어 쓴다. 서버가 남겨 둔 '마지막 결과'에도 똑같이 쓴다.
   function describeRun(run) {
     const word = run.direction === 'archive' ? '보관' : '불러오기';
@@ -427,7 +492,12 @@
       if (a.returned) lines.push('그림 되돌려 놓음: ' + a.returned + '장');
       if (run.foldersRestored) lines.push('앱 목록의 원래 자리로 돌려놓음: ' + run.foldersRestored + '개 (그 가운데 폴더 안으로 ' + (run.intoFolders || 0) + '개)');
     }
-    if (run.failed.length) lines.push('실패한 것: ' + JSON.stringify(run.failed.slice(0, 10)));
+    if (run.failed.length) {
+      // 옮기지 못한 봇과 그 까닭. 어느 경우에도 덮어쓰거나 지우지 않고 건너뛴 것이다.
+      lines.push('옮기지 못한 것 ' + run.failed.length + '개 (건너뛰었고, 아무것도 덮어쓰지 않았습니다):');
+      for (const item of run.failed.slice(0, 10)) lines.push('  ' + nameOfBot(item.id) + ': ' + (FAIL_REASONS[item.error] || item.error || '알 수 없는 까닭'));
+      if (run.failed.length > 10) lines.push('  … 그 밖에 ' + (run.failed.length - 10) + '개');
+    }
     if (run.settle === 'pending') lines.push('목록 정리는 서버가 뒤에서 합니다. 앱을 열어도 됩니다.');
     return lines;
   }
@@ -479,7 +549,10 @@
   async function move(ids, direction, resume, question) {
     if (busy || (!resume && !ids.length)) return;
     const word = direction === 'archive' ? '보관' : '불러오기';
-    if (!resume && !confirm(question || (ids.length + '개를 ' + word + '할까요?'))) return;
+    // 불러오려는 봇과 내용이 똑같은 봇이 이미 쓰는 것에 있으면 미리 알린다.
+    const doubled = direction === 'restore' ? ids.filter(id => twins.archived[id]).length : 0;
+    const warning = doubled ? '\n\n이 가운데 ' + doubled + '개는 내용이 똑같은 봇이 이미 "쓰는 것"에 있습니다. 불러오면 같은 봇이 두 개가 됩니다(채팅은 각각 따로 남습니다). 봇 폴더 이름까지 같은 봇은 불러오지 않고 건너뜁니다.' : '';
+    if (!resume && !confirm((question || (ids.length + '개를 ' + word + '할까요?')) + warning)) return;
     busy = true; count();
     settleWatch += 1;
     const startedAt = Date.now();
@@ -604,7 +677,9 @@
   $('tabActive').addEventListener('click', () => { tab = 'active'; picked = new Set(); render(); });
   $('tabArchived').addEventListener('click', () => { tab = 'archived'; picked = new Set(); render(); });
   $('search').addEventListener('input', render);
-  $('sort').addEventListener('change', render);
+  $('sort').addEventListener('change', () => { showSortEnd(); render(); });
+  $('sortFlip').addEventListener('click', () => { const sort = $('sort').value; flipped[sort] = !flipped[sort]; showSortEnd(); render(); });
+  showSortEnd();
   $('folder').addEventListener('change', render);
   try { $('showCovers').checked = localStorage.getItem('bangju.covers') === '1'; } catch {}
   $('showCovers').addEventListener('change', () => {
@@ -612,6 +687,7 @@
     render();
   });
   $('selectAll').addEventListener('click', () => { for (const item of visibleItems()) picked.add(item.id); render(); });
+  $('twinsOnly').addEventListener('click', () => { twinsOnly = !twinsOnly; render(); });
   $('selectNone').addEventListener('click', () => { picked = new Set(); render(); });
   $('selectTop').addEventListener('click', () => {
     const count = Math.max(1, Number($('topCount').value) || 0);
