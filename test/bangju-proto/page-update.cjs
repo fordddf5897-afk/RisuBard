@@ -61,7 +61,13 @@ const none = { status: 404, body: {} };
         asked.length = 0;
         await page.goto(`${base}/bangju/update`, { waitUntil: 'domcontentloaded' });
         await page.type('#password', 'test1234');
-        await page.click('#loginButton');
+        // The server allows ten sign-ins in thirty seconds; this test signs in once per scenario, so it waits when refused.
+        for (let attempt = 0; attempt < 12; attempt++) {
+            await page.click('#loginButton');
+            const signedIn = await page.waitForFunction(() => !document.getElementById('main').classList.contains('hidden'), { timeout: 3000 }).then(() => true, () => false);
+            if (signedIn) break;
+            await sleep(4000);
+        }
         await page.waitForFunction(() => !document.getElementById('main').classList.contains('hidden') && !/읽는 중/.test(document.getElementById('upstream').innerText + document.getElementById('image').innerText), { timeout: 15000 });
         await sleep(100);
     }
