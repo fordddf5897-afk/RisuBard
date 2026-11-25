@@ -1,4 +1,5 @@
 import { captureGenerationTarget, createGenerationScope, type GenerationTarget } from "./generationTarget";
+import { emitGenerationOutputStart } from "./generationEvents";
 import { isOocAssistantTurn, isOocToggleActive } from '../risubard/oocTurns'
 import { captureChatContext } from '../risubard/chatContextCapture'
 import { selectAnalysisLoreReference } from '../risubard/analysisLoreReference'
@@ -10,9 +11,11 @@ import { DBState } from '../stores.svelte';
 import { alertStore, CharEmotion, selectedCharID } from "../stores.svelte";
 import { ChatTokenizer, tokenize, tokenizeNum } from "../tokenizer";
 import { language } from "../../lang";
-import { alertConfirmMultiOutcome, alertError, notifyError } from "../alert";
+import { alertConfirmMultiOutcome, alertError, notifyError, notifyWarning } from "../alert";
+import { countStoryReplies, shouldKeepLatestReply } from "../risubard/historyBudget";
 import { parseChatML } from "../parser/chatML";
 import { loadLoreBookV3Prompt } from "./lorebook.svelte";
+import { selectFirstMessageSource } from "./firstMessage";
 import { isStableAlwaysActiveLore, resolveStableLoreIndex } from "./lorebookStablePrefix";
 import { findCharacterbyId, getPersonaPrompt, getUserName, isLastCharPunctuation, trimUntilPunctuation, parseToggleSyntax, prebuiltAssetCommand, sleep } from "../util";
 import { requestChatData } from "./request/request";
@@ -2314,16 +2317,14 @@ export async function sendChat(chatProcessIndex = -1,arg:{
 
     let renderedFirstMessageCache: { source: string, content: string } | undefined
     const renderFirstMessage = async (source: string) => {
-        if (renderedFirstMessageCache?.source === source) return renderedFirstMessageCache.content
+        if (renderedFirstMessageCache && renderedFirstMessageCache.source === source) return renderedFirstMessageCache.content
         const content = await processGenerationScript(nowChatroom,
             parseGenerationText(source, {chara: currentChar}),
         'editprocess')
         renderedFirstMessageCache = { source, content }
         return content
     }
-    const selectedFirstMessage = currentChat.firstMessageDisabled
-        ? undefined
-        : currentChat.fmIndex === -1 ? nowChatroom.firstMessage : nowChatroom.alternateGreetings?.[currentChat.fmIndex]
+    const selectedFirstMessage = selectFirstMessageSource(nowChatroom, currentChat)
     const lorepmt = await loadLoreBookV3Prompt({
         character: generationScope.character,
         chat: generationScope.chat,
@@ -2849,6 +2850,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{
 
     //await tokenize currernt
     let currentTokens = maxResponseTokens
+    let keptReplyOverflowTokens = 0
     const requiredWikiMessage = createRequiredWikiMessage(requiredWikiSources, responseWikiPromptGuide)
     if (requiredWikiMessage) currentTokens += await tokenizer.tokenizeChat(requiredWikiMessage)
     if (cacheFriendlyNarrativeMessage) currentTokens += await tokenizer.tokenizeChat(cacheFriendlyNarrativeMessage)
@@ -3115,7 +3117,8 @@ export async function sendChat(chatProcessIndex = -1,arg:{
     let ms:Message[] = makeMs(currentChat)
     const addFirstMessage = async () => {
         if(msReseted || currentChat.firstMessageDisabled) return
-        const firstMsg = currentChat.fmIndex === -1 ? nowChatroom.firstMessage : nowChatroom.alternateGreetings[currentChat.fmIndex]
+        const firstMsg = selectFirstMessageSource(nowChatroom, currentChat)
+        if(firstMsg === undefined) return
 
         const chat:OpenAIChat = {
             role: 'assistant',
@@ -3331,7 +3334,14 @@ export async function sendChat(chatProcessIndex = -1,arg:{
     // compatibility data and must not activate another summarizer here.
     {
         stageTimings.stage1Duration = Date.now() - stageTimings.stage1Start
+        const selectedReplyCount = countStoryReplies(chats)
         while(currentTokens > maxContextTokens){
+            // The latest reply is usually not in BardWiki yet; without it the
+            // model loses the scene right before the input.
+            if(shouldKeepLatestReply(chats, currentTokens - maxContextTokens, maxResponseTokens)){
+                keptReplyOverflowTokens = currentTokens - maxContextTokens
+                break
+            }
             if(chats.length <= 1){
                 throwError(language.errors.toomuchtoken + "\n\nRequired Tokens: " + currentTokens)
                 endGeneration(genKey)
@@ -3340,6 +3350,12 @@ export async function sendChat(chatProcessIndex = -1,arg:{
 
             currentTokens -= await tokenizer.tokenizeChat(chats[0])
             chats.splice(0, 1)
+        }
+        const keptReplyCount = countStoryReplies(chats)
+        if(keptReplyCount < selectedReplyCount){
+            notifyWarning(language.risuBardHistoryTrimmed
+                .replace('{{kept}}', String(keptReplyCount))
+                .replace('{{selected}}', String(selectedReplyCount)))
         }
     }
 
@@ -3763,7 +3779,9 @@ export async function sendChat(chatProcessIndex = -1,arg:{
         inputTokens += messageTokens
     }
 
-    const inputTokenLimit = requiredWikiMessage ? maxContextTokens - maxResponseTokens : maxContextTokens
+    // The latest reply kept over budget above must not be blanked here again.
+    const inputTokenLimit = (requiredWikiMessage ? maxContextTokens - maxResponseTokens : maxContextTokens)
+        + keptReplyOverflowTokens
     if(inputTokens > inputTokenLimit){
         let pointer = 0
         while(inputTokens > inputTokenLimit){
@@ -3928,6 +3946,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{
     if(abortSignal.aborted === true){
         return false
     }
+    if(req.type !== 'fail') emitGenerationOutputStart()
     if(req.type === 'fail'){
         throwError(req.result)
         endGeneration(genKey)
