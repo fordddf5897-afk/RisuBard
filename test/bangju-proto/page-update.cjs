@@ -111,6 +111,11 @@ const none = { status: 404, body: {} };
     ok('when the button cannot publish the merge, the step says to ask Claude and offers no workflow link', byClaude.includes('Claude에게 맡깁니다') && byClaude.includes('RisuBard 0.9.105 합쳐 줘') && byClaude.includes('Sync fork')
         && !(await has('#mergeStep a')) && (await text('nasStep')).includes('합친 뒤'), byClaude.slice(0, 160));
 
+    // 2c. changes arrived without a new version number: it must not say that "0.9.104 is out" to someone on 0.9.104
+    await open({ image: found(mainImage(MAIN)), status: found(check({ upstream: { url: '', branch: 'main', sha: 'c'.repeat(40), version: '0.9.104' }, commits: { total: 5, list: [] } })) });
+    const sameNumber = await text('upstreamState');
+    ok('changes without a new version number are described as changes, not as a version', sameNumber.includes('새 변경 5개가 올라와 있습니다') && sameNumber.includes('버전 번호는 그대로 0.9.104입니다') && !sameNumber.includes('버전이 나와 있습니다'), sameNumber);
+
     // 3. it does not merge
     await open({ image: found(mainImage(MAIN)), status: found(check({ status: 'conflict', risk: 'high', conflicts: ['server/node/server.cjs', 'src/App.svelte'], reasons: ['합칠 때 파일 2개가 부딪칩니다: server/node/server.cjs, src/App.svelte'], checks: { easy: 'skipped', bangju: 'skipped' } })) });
     const high = await text('upstream');
