@@ -44,18 +44,22 @@
     // On touch screens the chips stick right under the header, so they need its height.
     let headerHeight = $state(0)
 
+    // 방주 K1: only works made from chatbot-site prompts.
+    let siteOnly = $state(false)
+    const siteCount = $derived(works.filter((work) => work.siteBased).length)
+    $effect(() => { if (siteCount === 0) siteOnly = false })
     const shown = $derived(sortWorks(
-        filterWorks(filterByFolder(works, DBState.db.characterOrder, activeFolder), { query, tag: activeTag }),
+        filterWorks(filterByFolder(works, DBState.db.characterOrder, activeFolder), { query, tag: activeTag }).filter((work) => !siteOnly || work.siteBased),
         easyPrefs.homeSort,
     ))
-    const searching = $derived(query.trim().length > 0 || activeTag !== null)
+    const searching = $derived(query.trim().length > 0 || activeTag !== null || siteOnly)
 
     // Only the first cards are drawn; more are drawn as the end of the grid comes into view.
     let limit = $state(LIST_PAGE)
     const drawn = $derived(shown.slice(0, limit))
     $effect(() => {
         // A new search, tag, folder or order starts from the top again.
-        void query; void activeTag; void activeFolder; void easyPrefs.homeSort
+        void query; void activeTag; void activeFolder; void easyPrefs.homeSort; void siteOnly
         untrack(() => { limit = LIST_PAGE })
     })
 
@@ -101,7 +105,7 @@
                 <HouseIcon size={20} />
             </button>
             <span class="flex-1"></span>
-            <button type="button" class="flex h-10 items-center gap-1 rounded-full bg-primary px-3 text-sm font-semibold text-accenttext hover:opacity-90" onclick={onAddWork}>
+            <button type="button" class="flex h-10 items-center gap-1 rounded-full bg-primary px-3 text-sm font-semibold text-accenttext hover:opacity-90" data-easy-add-work onclick={onAddWork}>
                 <PlusIcon size={18} />
                 <span>작품 추가</span>
             </button>
@@ -151,9 +155,12 @@
                     {/if}
                 {/if}
             </div>
-            {#if tags.length}
+            {#if tags.length || siteCount}
                 <div class="easy-chip-row no-scrollbar -mx-4 mt-3 flex gap-2 px-4" role="group" aria-label="태그" data-easy-tags>
-                    <button type="button" class="easy-chip" class:is-active={activeTag === null} onclick={() => { activeTag = null }}>전체</button>
+                    <button type="button" class="easy-chip" class:is-active={activeTag === null && !siteOnly} onclick={() => { activeTag = null; siteOnly = false }}>전체</button>
+                    {#if siteCount}
+                        <button type="button" class="easy-chip" class:is-active={siteOnly} aria-pressed={siteOnly} data-easy-site-only onclick={() => { siteOnly = !siteOnly }}>사이트 기반 {siteCount}</button>
+                    {/if}
                     {#each tags as item (item.tag)}
                         <button type="button" class="easy-chip" class:is-active={activeTag === item.tag} onclick={() => { activeTag = activeTag === item.tag ? null : item.tag }}>
                             #{item.tag}

@@ -106,7 +106,9 @@ function createBangjuArchive({ dataRoot, resolveActiveDirectory, collectAssetRef
             : [];
         const image = typeof metadata?.image === 'string' && /^assets\/[A-Za-z0-9._-]+$/.test(metadata.image)
             ? metadata.image.slice('assets/'.length) : '';
-        return { tags, image };
+        // K1: a bot made from chatbot-site prompts carries this mark; a bot without it is RisuAI-based.
+        const site = metadata?.extentions?.bangju?.base === 'site';
+        return site ? { tags, image, site: true } : { tags, image };
     }
 
     // What the archive list shows for one bot, read from its own folder.

@@ -3,6 +3,7 @@
 // lives in `character.extentions[EASY_META_KEY]`, which card export/import
 // already carries as `data.extensions`, so cards stay RisuAI-compatible.
 import { toChatPreviewText } from '../risubard/chatPreviewText'
+import { isSiteBased } from './siteWork'
 
 export const EASY_META_KEY = 'risuEasy'
 
@@ -48,6 +49,8 @@ export interface EasyWork {
     lastInteraction: number
     createdAt: number
     chatCount: number
+    /** 방주: made from chatbot-site prompts (K1). False means a plain RisuAI bot. */
+    siteBased: boolean
 }
 
 export type EasyWorkSort = 'recent' | 'new' | 'name'
@@ -111,6 +114,7 @@ export function toEasyWork(character: EasyCharacterLike, index: number): EasyWor
         lastInteraction: character.lastInteraction ?? 0,
         createdAt: character.creation_date ?? 0,
         chatCount: character.chats?.length ?? 0,
+        siteBased: isSiteBased(character),
     }
 }
 

@@ -24,6 +24,9 @@
             fallback={work.name}
             className="h-full w-full object-cover text-4xl transition-transform duration-300 group-hover:scale-[1.03]"
         />
+        {#if work.siteBased}
+            <span class="absolute left-2 top-2 rounded-full bg-darkbg/85 px-2 py-0.5 text-[11px] text-textcolor backdrop-blur-sm" data-easy-site-badge>사이트 기반</span>
+        {/if}
         {#if work.lastInteraction > 0}
             <span class="absolute bottom-2 left-2 rounded-full bg-darkbg/85 px-2 py-0.5 text-[11px] text-textcolor backdrop-blur-sm">
                 {formatPreviewTime(work.lastInteraction)} 대화

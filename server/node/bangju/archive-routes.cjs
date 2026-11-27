@@ -285,7 +285,7 @@ function registerBangjuArchiveRoutes(app, {
             }
             return {
                 id: character.id, name: character.name || '', cardBytes, chats: (character.chats || []).length,
-                lastChatAt: lastChatAt(character), tags: known?.tags || [], hasCover: Boolean(known?.image),
+                lastChatAt: lastChatAt(character), tags: known?.tags || [], hasCover: Boolean(known?.image), site: known?.site === true,
                 folderId: folderOf.get(character.id) || '',
             };
         });
@@ -478,7 +478,7 @@ function registerBangjuArchiveRoutes(app, {
                 const archived = stored.map(entry => ({
                     id: entry.id, name: entry.name, cardBytes: entry.cardBytes, chats: entry.chats,
                     assetCount: entry.assetCount, archivedAt: entry.archivedAt,
-                    lastChatAt: lastChatAt(entry.sidebar), tags: entry.tags || [], hasCover: Boolean(entry.image),
+                    lastChatAt: lastChatAt(entry.sidebar), tags: entry.tags || [], hasCover: Boolean(entry.image), site: entry.site === true,
                     // The app folder it was in. A folder deleted since then is shown by its old name.
                     folderId: entry.order?.folderId || '',
                     ...(entry.order?.folderId && !folderIds.has(entry.order.folderId) ? { folderName: entry.order.folderName || '' } : {}),
@@ -510,7 +510,7 @@ function registerBangjuArchiveRoutes(app, {
         if (!await auth(req, res)) return;
         const facts = {};
         const memory = memoryFacts();
-        for (const [id, value] of memory || cachedFacts()) facts[id] = { tags: value.tags || [], hasCover: Boolean(value.image) };
+        for (const [id, value] of memory || cachedFacts()) facts[id] = { tags: value.tags || [], hasCover: Boolean(value.image), site: value.site === true };
         res.set('Cache-Control', 'no-store').json({ pending: memory ? 0 : factsPending(), facts });
     });
 

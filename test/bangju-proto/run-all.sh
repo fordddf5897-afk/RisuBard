@@ -71,6 +71,7 @@ if [ -n "$CHROME" ]; then
     if [ $APP -eq 1 ]; then
       if (cd "$REPO" && NODE_OPTIONS=--max-old-space-size=4096 node node_modules/vite/bin/vite.js build > "$WORK/build.log" 2>&1); then
         start BANGJU_ARCHIVE_SETTLE=now && node seed2.cjs "$BASE" 240 > /dev/null && check "간편 모드 화면(실제 브라우저, 실제 앱)" env NODE_PATH="${PUPPETEER_DIR:-$WORK/browser}/node_modules" CHROME="$CHROME" node page-easy.cjs "$BASE" "$ROOT"; finish
+        start BANGJU_ARCHIVE_SETTLE=now && seeded && check "사이트 프롬으로 작품 만들기(실제 브라우저, 실제 앱)" env NODE_PATH="${PUPPETEER_DIR:-$WORK/browser}/node_modules" CHROME="$CHROME" node page-site.cjs "$BASE" "$ROOT"; finish
       else FAILED=$((FAILED + 1)); SUMMARY="$SUMMARY\n  실패  앱 짓기"; echo "=== 앱 짓기: 실패"; tail -30 "$WORK/build.log"; fi
     fi
   else SKIPPED=$((SKIPPED + 1)); SUMMARY="$SUMMARY\n  건너뜀  화면(실제 브라우저): puppeteer-core를 받지 못함"; fi

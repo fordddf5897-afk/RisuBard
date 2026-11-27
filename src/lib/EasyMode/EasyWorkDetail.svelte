@@ -17,9 +17,11 @@
         onStart: (options: { fmIndex: number; personaId: string; title: string }) => void
         onOpenChat: (chatId: string) => void
         onEdit: () => void
+        /** 방주: opens the site-prompt editor for a site-based work. */
+        onEditSite?: () => void
     }
 
-    let { chaId, onBack, onStart, onOpenChat, onEdit }: Props = $props()
+    let { chaId, onBack, onStart, onOpenChat, onEdit, onEditSite }: Props = $props()
 
     const chara = $derived(DBState.db.characters.find((item) => item?.chaId === chaId) as character | undefined)
     const work = $derived(chara ? toEasyWork(chara, DBState.db.characters.indexOf(chara)) : undefined)
@@ -126,6 +128,13 @@
         </button>
         <span class="hidden min-w-0 flex-1 truncate text-base font-semibold md:block">{work.name}</span>
         <span class="flex-1 md:hidden"></span>
+        {#if work.siteBased && onEditSite}
+            <!-- 방주: a site-based work is edited in the same fields it was made in. -->
+            <button type="button" class="flex h-10 items-center gap-1.5 rounded-full bg-darkbg/80 px-3 text-sm backdrop-blur-sm hover:bg-selected" data-easy-edit-site onclick={onEditSite}>
+                <PencilIcon size={16} />
+                사이트 프롬 고치기
+            </button>
+        {/if}
         <button type="button" class="flex h-10 items-center gap-1.5 rounded-full bg-darkbg/80 px-3 text-sm backdrop-blur-sm hover:bg-selected" onclick={onEdit}>
             <SettingsIcon size={16} />
             작품 설정
@@ -149,6 +158,9 @@
                 </button>
                 {#if work.creator}
                     <p class="mt-1 text-xs text-textcolor2">@{work.creator}</p>
+                {/if}
+                {#if work.siteBased}
+                    <p class="mt-2 inline-flex rounded-full border border-darkborderc px-2.5 py-0.5 text-xs text-textcolor2" data-easy-site-badge>사이트 기반</p>
                 {/if}
                 {#if folders.length}
                     <button type="button" class="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-darkborderc bg-darkbg px-3 py-1 text-xs text-textcolor2 hover:border-borderc hover:text-textcolor" data-easy-work-folder onclick={chooseFolder}>

@@ -15,10 +15,13 @@
     import EasySheet from './EasySheet.svelte'
     import EasyWorkEditor from './EasyWorkEditor.svelte'
     import EasySettings from './EasySettings.svelte'
+    import EasySiteEditor from './EasySiteEditor.svelte'
     import SideChatList from '../SideBars/SideChatList.svelte'
 
-    type Sheet = null | 'settings' | 'editor' | 'chats'
+    type Sheet = null | 'settings' | 'editor' | 'chats' | 'site'
     let sheet = $state<Sheet>(null)
+    // 방주: the work the site editor has open ('' = a new one).
+    let siteChaId = $state('')
     let editorTab = $state(0)
 
     interface HistoryEntry { page: EasyPage; chaId: string }
@@ -114,6 +117,17 @@
         sheet = 'editor'
     }
 
+    // 방주: the site-prompt editor. It makes or rewrites the work only when its save button is pressed.
+    function openSiteEditor(chaId: string) {
+        siteChaId = chaId
+        sheet = 'site'
+    }
+
+    function siteSaved(chaId: string) {
+        sheet = null
+        go('detail', chaId)
+    }
+
     function closeSheet() {
         const closing = sheet
         sheet = null
@@ -122,10 +136,11 @@
     }
 
     async function addWork() {
-        const choice = await alertSelect(['파일에서 가져오기 (.charx · .png · .json)', '빈 작품 새로 만들기', '취소'], '작품 추가')
+        const choice = await alertSelect(['파일에서 가져오기 (.charx · .png · .json)', '빈 작품 새로 만들기', '챗봇 사이트 프롬으로 만들기 (에덴챗 · 루나톡)', '취소'], '작품 추가')
         const before = new Set(DBState.db.characters.map((item) => item?.chaId))
         if (choice === '0') await importCharacter()
         else if (choice === '1') createNewCharacter()
+        else if (choice === '2') { openSiteEditor(''); return }
         else return
         const added = DBState.db.characters.filter((item) => item && !before.has(item.chaId))
         const target = added.at(-1)
@@ -146,6 +161,7 @@
                 onStart={startChat}
                 onOpenChat={openExistingChat}
                 onEdit={() => openEditor(0)}
+                onEditSite={() => openSiteEditor(easyView.chaId)}
             />
         {/key}
     {:else if easyView.page === 'chat'}
@@ -166,6 +182,12 @@
 {:else if sheet === 'editor' && $selectedCharID >= 0}
     <EasySheet title="작품 설정 · {DBState.db.characters[$selectedCharID]?.name ?? ''}" onClose={closeSheet} wide>
         <EasyWorkEditor bind:tab={editorTab} />
+    </EasySheet>
+{:else if sheet === 'site'}
+    <EasySheet title={siteChaId ? '사이트 프롬으로 고치기' : '챗봇 사이트 프롬으로 만들기'} onClose={closeSheet} wide>
+        {#key siteChaId}
+            <EasySiteEditor chaId={siteChaId} onSaved={siteSaved} />
+        {/key}
     </EasySheet>
 {:else if sheet === 'chats' && $selectedCharID >= 0}
     <EasySheet title="대화 목록 · 채팅 설정" onClose={closeSheet}>
