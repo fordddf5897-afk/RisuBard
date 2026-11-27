@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-11-27T20:17:52.641Z",
+  "repository": "fordddf5897-afk/RisuBard",
+  "base": {
+    "sha": "ae72b7e1873d45b7ee7127e327c3cb5517fcaf2e",
+    "version": "0.9.104"
+  },
+  "upstream": {
+    "url": "https://github.com/rpaddict/RisuBard",
+    "branch": "main",
+    "sha": "463ea98f1facf2bd076c9570d7eec96058a77011",
+    "version": "0.9.104"
+  },
+  "status": "up-to-date",
+  "commits": {
+    "total": 0,
+    "list": []
+  },
+  "files": {
+    "total": 0,
+    "storage": [],
+    "dependencies": [],
+    "overlap": [],
+    "workflows": []
+  },
+  "conflicts": [],
+  "checks": {
+    "easy": "skipped",
+    "bangju": "skipped"
+  },
+  "mergeByButton": true,
+  "risk": "none",
+  "reasons": [],
+  "runUrl": "https://github.com/fordddf5897-afk/RisuBard/actions/runs/46062632181"
+}
