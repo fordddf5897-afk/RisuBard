@@ -70,14 +70,25 @@
   const RISK = { high: ['높음', 'high'], medium: ['중간', 'medium'], low: ['낮음', 'low'], none: ['없음', 'plain'] };
   let token = null, info = null;
 
+  // 서버(RisuBard)는 들어가기를 30초에 10번까지만 받는다. 한 번 누른 것이 여러 번으로 나가지 않게 한다:
+  // 보내는 중에는 다시 보내지 않고, Enter를 누르고 있어서 반복되는 입력은 세지 않는다.
+  let signingIn = false;
   async function login() {
+    if (signingIn) return;
+    signingIn = true;
+    $('loginButton').disabled = true;
     $('loginError').textContent = '';
     try {
       // 앱과 같은 방식: 비밀번호를 그대로 보내지 않고, 서버가 만들어 준 요약값을 보낸다.
       const digested = await fetch('/api/crypto', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data: $('password').value }) });
       if (!digested.ok) throw new Error('비밀번호를 확인하지 못했습니다 (' + digested.status + ').');
       const response = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: await digested.text() }) });
-      if (response.status === 429) throw new Error('시도가 너무 많았습니다. 잠시 뒤에 다시 해 주세요.');
+      if (response.status === 429) {
+        // 서버가 알려 주는 남은 시간(초). 없으면 가장 긴 30초로 안내한다.
+        const reset = Number(response.headers.get('ratelimit-reset'));
+        const wait = reset > 0 && reset <= 60 ? Math.ceil(reset) : 30;
+        throw new Error('들어가기 시도가 너무 많아 서버가 잠시 막았습니다. ' + wait + '초쯤 뒤에 다시 눌러 주세요. (서버는 30초에 10번까지만 받고, 같은 주소로 들어오는 기기를 함께 셉니다.)');
+      }
       const json = await response.json();
       if (!json.token) throw new Error('비밀번호가 맞지 않습니다.');
       token = json.token;
@@ -88,6 +99,7 @@
       $('main').classList.remove('hidden');
       await show();
     } catch (error) { $('loginError').textContent = error.message; }
+    finally { signingIn = false; $('loginButton').disabled = false; }
   }
 
   // GitHub에서 읽는 것은 공개 정보뿐이라 로그인 없이 읽는다.
@@ -270,7 +282,7 @@
     else { const range = document.createRange(); range.selectNodeContents(button.previousElementSibling); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); button.textContent = '골라 두었습니다 (Ctrl+C)'; }
   });
   $('loginButton').addEventListener('click', login);
-  $('password').addEventListener('keydown', event => { if (event.key === 'Enter') login(); });
+  $('password').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.repeat) login(); });
 })();
 </script>
 </body>

@@ -48,8 +48,16 @@ const none = { status: 404, body: {} };
     let answers = { image: none, status: none, runs: found({ workflow_runs: [] }) };
     const asked = [];
     await page.setRequestInterception(true);
+    // The sign-in request can be refused or held back, to see what the page does with one press.
+    let signIn = null;
+    let signInCalls = 0;
     page.on('request', request => {
         const url = request.url();
+        if (signIn && url.endsWith('/api/login')) {
+            signInCalls += 1;
+            if (signIn === 'refused') return request.respond({ status: 429, contentType: 'application/json', headers: { 'ratelimit-reset': '17' }, body: '{"error":"Too many attempts."}' });
+            return void setTimeout(() => request.continue(), 900);
+        }
         const reply = url.startsWith('https://api.github.com/') ? answers.runs
             : url.startsWith('https://raw.githubusercontent.com/') ? (url.endsWith('/main-image.json') ? answers.image : answers.status) : null;
         if (!reply) return request.continue();
@@ -74,6 +82,28 @@ const none = { status: 404, body: {} };
     const text = id => page.$eval('#' + id, element => element.innerText.replace(/\s+/g, ' ').trim());
     const has = selector => page.$(selector).then(Boolean);
     const hidden = id => page.$eval('#' + id, element => element.classList.contains('hidden'));
+
+    // the server takes ten sign-ins in thirty seconds: one press must be one request, and a refusal must say how long to wait
+    answers = { image: none, status: none, runs: found({ workflow_runs: [] }) };
+    await page.goto(`${base}/bangju/update`, { waitUntil: 'domcontentloaded' });
+    await page.type('#password', 'test1234');
+    signIn = 'refused';
+    await page.click('#loginButton');
+    await page.waitForFunction(() => document.getElementById('loginError').textContent.length > 0, { timeout: 8000 });
+    const refused = await page.$eval('#loginError', item => item.textContent);
+    ok('a refused sign-in says the server blocked it and how many seconds to wait', refused.includes('서버가 잠시 막았습니다') && refused.includes('17초쯤 뒤에') && signInCalls === 1 && await page.$eval('#loginButton', button => !button.disabled), refused);
+    signIn = 'slow';
+    signInCalls = 0;
+    await page.evaluate(() => {
+        const box = document.getElementById('password');
+        document.getElementById('loginButton').click();
+        document.getElementById('loginButton').click();
+        box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        for (let i = 0; i < 5; i++) box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', repeat: true, bubbles: true }));
+    });
+    await page.waitForFunction(() => !document.getElementById('main').classList.contains('hidden'), { timeout: 15000 });
+    ok('pressing twice, Enter, and a held Enter while it is signing in send one request', signInCalls === 1, String(signInCalls));
+    signIn = null;
 
     // 1. a new version (medium), and a newer main image than the installed one
     await open({ image: found(mainImage(MAIN)), status: found(check({})), runs: found({ workflow_runs: [run(MAIN)] }) });
