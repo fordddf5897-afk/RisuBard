@@ -12,6 +12,8 @@ const work = fs.mkdtempSync(path.join(os.tmpdir(), 'bangju-update-page-'));
 const REPO = 'someone/Some-Fork';
 const MAIN = 'bbbbbbb1234567890abcdef1234567890abcdef0';
 const INSTALLED = 'aaaaaaa';
+// 화면의 "지금 설치본" 버전은 서버가 자기 package.json에서 읽는다. 원본의 새 버전을 합칠 때마다 숫자가 바뀌므로 여기서도 읽어 온다.
+const APP_VERSION = require(path.join(__dirname, '..', '..', 'package.json')).version;
 function restart(build) {
     const file = path.join(work, 'build-info.json');
     if (build) fs.writeFileSync(file, JSON.stringify(build)); else fs.rmSync(file, { force: true });
@@ -82,7 +84,7 @@ const none = { status: 404, body: {} };
         && asked.includes(`https://raw.githubusercontent.com/${REPO}/bangju-status/update-check.json`)
         && asked.includes(`https://api.github.com/repos/${REPO}/actions/workflows/easy-mode-sync.yml/runs?branch=main&per_page=5`), asked.join(' '));
     const current = await text('current');
-    ok('it shows the installed version and image', current.includes('v0.9.104') && await text('currentTag') === 'sha-aaaaaaa' && !current.includes('시험용'), current);
+    ok('it shows the installed version and image', current.includes('v' + APP_VERSION) && await text('currentTag') === 'sha-aaaaaaa' && !current.includes('시험용'), current);
     const image = await text('image');
     ok('a newer main image is offered with the NAS steps and the exact image line', await text('latestTag') === 'sha-bbbbbbb' && image.includes('갱신할 것 있음') && image.includes('묻는 창에서 "빌드하고 시작"이 아니라 변경 사항만 저장') && image.includes('정리')
         && image.includes('스냅샷을 찍어 두세요') && await page.$eval('#image pre.copy', element => element.textContent) === 'image: ghcr.io/someone/some-fork:sha-bbbbbbb', image.slice(0, 120));
